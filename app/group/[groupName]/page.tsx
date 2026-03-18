@@ -3,6 +3,7 @@ import Link from "next/link";
 import {ChevronLeft} from "lucide-react";
 
 import {GroupDashboardBootstrap} from "@/components/group-dashboard-bootstrap";
+import {getAdminSession} from "@/lib/admin/auth";
 import {getAvailableGroups} from "@/lib/core/group-data";
 import {loadSiteSettings} from "@/lib/site-settings";
 
@@ -29,7 +30,10 @@ export default async function GroupPage({ params }: GroupPageProps) {
   const { groupName } = await params;
   const decodedGroupName = decodeURIComponent(groupName);
 
-  const availableGroups = await getAvailableGroups();
+  const [availableGroups, adminSession] = await Promise.all([
+    getAvailableGroups(),
+    getAdminSession(),
+  ]);
   if (!availableGroups.includes(decodedGroupName)) {
     notFound();
   }
@@ -46,7 +50,10 @@ export default async function GroupPage({ params }: GroupPageProps) {
           返回首页
         </Link>
 
-        <GroupDashboardBootstrap groupName={decodedGroupName} />
+        <GroupDashboardBootstrap
+          groupName={decodedGroupName}
+          canForceRefresh={Boolean(adminSession)}
+        />
       </main>
     </div>
   );

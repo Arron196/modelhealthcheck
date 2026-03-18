@@ -6,10 +6,11 @@
 import {historySnapshotStore} from "../database/history";
 import {loadProviderConfigsFromDB} from "../database/config-loader";
 import {runProviderChecks} from "../providers";
+import {invalidateDashboardCache} from "./dashboard-data";
+import {clearPingCache} from "./global-state";
 import {getPollingIntervalMs} from "./polling-config";
 import {getLastPingStartedAt, getPollerTimer, setLastPingStartedAt, setPollerTimer,} from "./global-state";
 import {startOfficialStatusPoller} from "./official-status-poller";
-import {ensurePollerLeadership, isPollerLeader} from "./poller-leadership";
 import type {CheckResult, HealthStatus} from "../types";
 
 const POLL_INTERVAL_MS = getPollingIntervalMs();
@@ -84,19 +85,81 @@ function logFailedResultsByGroup(results: CheckResult[]): void {
   console.error("[check-cx] ====================== 批次结束 =====================");
 }
 
+function isBuildPhase(): boolean {
+  const maybeProcess = Reflect.get(globalThis, "process");
+  if (!maybeProcess || typeof maybeProcess !== "object") {
+    return false;
+  }
+
+  const maybeEnv = Reflect.get(maybeProcess, "env");
+  if (!maybeEnv || typeof maybeEnv !== "object") {
+    return false;
+  }
+
+  return Reflect.get(maybeEnv, "NEXT_PHASE") === "phase-production-build";
+}
+
+function isRecoveryTickDue(now: number): boolean {
+  const lastStartedAt = getLastPingStartedAt();
+  if (!lastStartedAt) {
+    return true;
+  }
+
+  return now - lastStartedAt >= POLL_INTERVAL_MS;
+}
+
+function requestRecoveryTick(reason: string): void {
+  if (isBuildPhase() || globalThis.__checkCxPollerRunning) {
+    return;
+  }
+
+  const now = Date.now();
+  if (!isRecoveryTickDue(now)) {
+    return;
+  }
+
+  setLastPingStartedAt(now);
+  console.log(
+    `[check-cx] 检测到后台轮询空窗，立即补跑一轮（reason=${reason}）`
+  );
+  tick()
+    .catch((error) => {
+      console.error("[check-cx] 补跑轮询失败", error);
+    });
+}
+
+function startCheckPoller(): void {
+  if (isBuildPhase()) {
+    return;
+  }
+
+  if (getPollerTimer()) {
+    return;
+  }
+
+  const firstCheckAt = new Date(Date.now() + POLL_INTERVAL_MS).toISOString();
+  console.log(
+    `[check-cx] 初始化本地后台轮询器，interval=${POLL_INTERVAL_MS}ms，首次检测预计 ${firstCheckAt}`
+  );
+  const timer = setInterval(() => {
+    tick().catch((error) => console.error("[check-cx] 定时检测失败", error));
+  }, POLL_INTERVAL_MS);
+  setPollerTimer(timer);
+
+  startOfficialStatusPoller();
+
+  requestRecoveryTick("poller-startup");
+}
+
+export function ensureCheckPoller(): void {
+  startCheckPoller();
+  requestRecoveryTick("ensure-check-poller");
+}
+
 /**
  * 执行一次轮询检查
  */
 async function tick() {
-  try {
-    await ensurePollerLeadership();
-  } catch (error) {
-    console.error("[check-cx] 主节点选举失败，跳过本轮轮询", error);
-    return;
-  }
-  if (!isPollerLeader()) {
-    return;
-  }
   // 原子操作：检查并设置运行状态
   if (globalThis.__checkCxPollerRunning) {
     const lastStartedAt = getLastPingStartedAt();
@@ -122,6 +185,11 @@ async function tick() {
 
     const results = await runProviderChecks(configs);
     await historySnapshotStore.append(results);
+    clearPingCache();
+    invalidateDashboardCache();
+    console.log(
+      `[check-cx] 后台轮询完成：写入 ${results.length} 条检测结果，时间 ${new Date().toISOString()}`
+    );
     logFailedResultsByGroup(results);
   } catch (error) {
     console.error("[check-cx] 轮询检测失败", error);
@@ -130,20 +198,4 @@ async function tick() {
   }
 }
 
-// 自动初始化轮询器
-if (!getPollerTimer()) {
-  const firstCheckAt = new Date(Date.now() + POLL_INTERVAL_MS).toISOString();
-  console.log(
-    `[check-cx] 初始化后台轮询器，interval=${POLL_INTERVAL_MS}ms，首次检测预计 ${firstCheckAt}`
-  );
-  ensurePollerLeadership().catch((error) => {
-    console.error("[check-cx] 初始化主节点选举失败", error);
-  });
-  const timer = setInterval(() => {
-    tick().catch((error) => console.error("[check-cx] 定时检测失败", error));
-  }, POLL_INTERVAL_MS);
-  setPollerTimer(timer);
-
-  // 启动官方状态轮询器
-  startOfficialStatusPoller();
-}
+ensureCheckPoller();

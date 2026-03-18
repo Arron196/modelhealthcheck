@@ -14,6 +14,7 @@ import {cn} from "@/lib/utils";
 interface GroupDashboardViewProps {
   groupName: string;
   initialData: GroupDashboardData;
+  canForceRefresh: boolean;
 }
 
 /** 计算所有 Provider 中最近一次检查的时间戳（毫秒） */
@@ -35,6 +36,8 @@ const computeRemainingMs = (
   const remaining = pollIntervalMs - (clock - latestCheckTimestamp);
   return Math.max(0, remaining);
 };
+
+const AUTO_SYNC_RETRY_MS = 5_000;
 
 const PERIOD_OPTIONS: Array<{ value: AvailabilityPeriod; label: string }> = [
   { value: "7d", label: "7 天" },
@@ -61,13 +64,21 @@ const CornerPlus = ({ className }: { className?: string }) => (
  * - 展示单个分组内的所有 Provider 卡片
  * - 支持客户端定时刷新
  */
-export function GroupDashboardView({ groupName, initialData }: GroupDashboardViewProps) {
+export function GroupDashboardView({
+  groupName,
+  initialData,
+  canForceRefresh,
+}: GroupDashboardViewProps) {
   const [data, setData] = useState(initialData);
   const [selectedPeriod, setSelectedPeriod] = useState<AvailabilityPeriod>(
     initialData.trendPeriod ?? "7d"
   );
   const [isRefreshing, setIsRefreshing] = useState(false);
   const lockRef = useRef(false);
+  const autoSyncRetryAtRef = useRef(0);
+  const [nextRefreshAnchor, setNextRefreshAnchor] = useState<number | null>(() =>
+    getLatestCheckTimestamp(initialData.providerTimelines)
+  );
   const [timeToNextRefresh, setTimeToNextRefresh] = useState<number | null>(() =>
     computeRemainingMs(
       initialData.pollIntervalMs,
@@ -77,11 +88,6 @@ export function GroupDashboardView({ groupName, initialData }: GroupDashboardVie
   );
   const [isCoarsePointer, setIsCoarsePointer] = useState(false);
   const [activeOfficialCardId, setActiveOfficialCardId] = useState<string | null>(null);
-  const latestCheckTimestamp = useMemo(
-    () => getLatestCheckTimestamp(data.providerTimelines),
-    [data.providerTimelines]
-  );
-
   const refresh = useCallback(
     async (
       period?: AvailabilityPeriod,
@@ -95,16 +101,20 @@ export function GroupDashboardView({ groupName, initialData }: GroupDashboardVie
     setIsRefreshing(true);
     try {
       const targetPeriod = period ?? selectedPeriod;
-      const result = await fetchGroupWithCache({
-        groupName,
-        trendPeriod: targetPeriod,
-        forceFresh,
-        revalidateIfFresh,
-        onBackgroundUpdate: (newData) => {
-          setData(newData);
-        },
-      });
-      setData(result.data);
+        const result = await fetchGroupWithCache({
+          groupName,
+          trendPeriod: targetPeriod,
+          forceFresh,
+          revalidateIfFresh,
+          onBackgroundUpdate: (newData) => {
+            autoSyncRetryAtRef.current = 0;
+            setNextRefreshAnchor(getLatestCheckTimestamp(newData.providerTimelines));
+            setData(newData);
+          },
+        });
+        autoSyncRetryAtRef.current = 0;
+        setNextRefreshAnchor(getLatestCheckTimestamp(result.data.providerTimelines));
+        setData(result.data);
     } catch (error) {
       console.error("[check-cx] 分组自动刷新失败", error);
     } finally {
@@ -115,6 +125,8 @@ export function GroupDashboardView({ groupName, initialData }: GroupDashboardVie
 
   useEffect(() => {
     setData(initialData);
+    autoSyncRetryAtRef.current = 0;
+    setNextRefreshAnchor(getLatestCheckTimestamp(initialData.providerTimelines));
     if (initialData.trendPeriod) {
       setGroupCache(groupName, initialData.trendPeriod, initialData);
     }
@@ -150,16 +162,6 @@ export function GroupDashboardView({ groupName, initialData }: GroupDashboardVie
   }, [isCoarsePointer]);
 
   useEffect(() => {
-    if (!data.pollIntervalMs || data.pollIntervalMs <= 0) {
-      return;
-    }
-    const timer = window.setInterval(() => {
-      refresh(undefined, false, true).catch(() => undefined);
-    }, data.pollIntervalMs);
-    return () => window.clearInterval(timer);
-  }, [data.pollIntervalMs, refresh]);
-
-  useEffect(() => {
     if (selectedPeriod === data.trendPeriod) {
       return;
     }
@@ -167,21 +169,42 @@ export function GroupDashboardView({ groupName, initialData }: GroupDashboardVie
   }, [data.trendPeriod, refresh, selectedPeriod]);
 
   useEffect(() => {
-    if (!data.pollIntervalMs || data.pollIntervalMs <= 0 || latestCheckTimestamp === null) {
+    if (!data.pollIntervalMs || data.pollIntervalMs <= 0 || nextRefreshAnchor === null) {
       setTimeToNextRefresh(null);
       return;
     }
 
     const updateCountdown = () => {
-      setTimeToNextRefresh(
-        computeRemainingMs(data.pollIntervalMs, latestCheckTimestamp)
-      );
+      const now = Date.now();
+      const remaining = computeRemainingMs(data.pollIntervalMs, nextRefreshAnchor, now);
+
+      if (remaining === null) {
+        setTimeToNextRefresh(null);
+        return;
+      }
+
+      if (remaining > 0) {
+        setTimeToNextRefresh(remaining);
+        return;
+      }
+
+      if (autoSyncRetryAtRef.current > now) {
+        setTimeToNextRefresh(autoSyncRetryAtRef.current - now);
+        return;
+      }
+
+      autoSyncRetryAtRef.current = now + AUTO_SYNC_RETRY_MS;
+      setTimeToNextRefresh(AUTO_SYNC_RETRY_MS);
+
+      if (!lockRef.current) {
+        refresh(undefined, false, true).catch(() => undefined);
+      }
     };
 
     updateCountdown();
     const countdownTimer = window.setInterval(updateCountdown, 1000);
     return () => window.clearInterval(countdownTimer);
-  }, [data.pollIntervalMs, latestCheckTimestamp]);
+  }, [data.pollIntervalMs, nextRefreshAnchor, refresh]);
 
   const { providerTimelines, total, lastUpdated, pollIntervalLabel, displayName } = data;
   const { availabilityStats } = data;
@@ -322,19 +345,21 @@ export function GroupDashboardView({ groupName, initialData }: GroupDashboardVie
                 </div>
                 <span className="opacity-30">|</span>
                 <span>{pollIntervalLabel} 轮询</span>
-                <button
-                  type="button"
-                  onClick={() => refresh(selectedPeriod, true)}
-                  disabled={isRefreshing}
-                  className={cn(
-                    "rounded-full border border-border/60 px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground transition-colors hover:border-border/80 hover:text-foreground",
-                    isRefreshing && "cursor-not-allowed opacity-60"
-                  )}
-                >
-                  刷新
-                </button>
-             </div>
-           )}
+                {canForceRefresh ? (
+                  <button
+                    type="button"
+                    onClick={() => refresh(selectedPeriod, true)}
+                    disabled={isRefreshing}
+                    className={cn(
+                      "rounded-full border border-border/60 px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground transition-colors hover:border-border/80 hover:text-foreground",
+                      isRefreshing && "cursor-not-allowed opacity-60"
+                    )}
+                  >
+                    刷新
+                  </button>
+                ) : null}
+              </div>
+            )}
         </div>
       </header>
 

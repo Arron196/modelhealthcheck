@@ -1,4 +1,5 @@
 import {NextResponse} from "next/server";
+import {getAdminSession} from "@/lib/admin/auth";
 import {loadGroupDashboardData} from "@/lib/core/group-data";
 import {getPollingIntervalMs} from "@/lib/core/polling-config";
 import type {AvailabilityPeriod} from "@/lib/types";
@@ -33,8 +34,13 @@ export async function GET(_request: Request, context: RouteContext) {
   const { searchParams } = new URL(_request.url);
   const period = searchParams.get("trendPeriod");
   const forceRefreshParam = searchParams.get("forceRefresh");
-  const shouldForceRefresh =
+  const bypassCacheParam = searchParams.get("bypassCache");
+  const forceRefreshRequested =
     forceRefreshParam === "1" || forceRefreshParam === "true";
+  const adminSession = forceRefreshRequested ? await getAdminSession() : null;
+  const shouldForceRefresh = forceRefreshRequested && Boolean(adminSession);
+  const shouldBypassCache =
+    bypassCacheParam === "1" || bypassCacheParam === "true";
   const trendPeriod = (["7d", "15d", "30d"] as AvailabilityPeriod[]).includes(
     period as AvailabilityPeriod
   )
@@ -44,6 +50,7 @@ export async function GET(_request: Request, context: RouteContext) {
   const data = await loadGroupDashboardData(decodedGroupName, {
     refreshMode: shouldForceRefresh ? "always" : "never",
     trendPeriod,
+    bypassCache: shouldBypassCache,
   });
 
   if (!data) {

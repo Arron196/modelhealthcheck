@@ -1,6 +1,12 @@
 import "server-only";
 
-import {getControlPlaneStorage, getDirectPostgresConnectionState, resolveDatabaseBackend} from "@/lib/storage/resolver";
+import {
+  getControlPlaneStorage,
+  getDirectPostgresConnectionState,
+  getStorageCapabilities,
+  getRuntimeStorageResolution,
+  resolveDatabaseBackend,
+} from "@/lib/storage/resolver";
 import type {ControlPlaneStorage, StorageCapabilities} from "@/lib/storage/types";
 import {runSupabaseDiagnostics, type SupabaseDiagnosticsReport} from "@/lib/admin/supabase-diagnostics";
 import {SITE_SETTINGS_SINGLETON_KEY} from "@/lib/types/site-settings";
@@ -29,9 +35,14 @@ export interface StorageDiagnosticsReport {
   generatedAt: string;
   provider: string;
   resolutionReason: string;
+  preferredProvider: string;
+  preferredReason: string;
+  isFailover: boolean;
+  failoverError: string | null;
   sqliteFilePath: string | null;
   postgresConnectionSource: string | null;
   storageReady: boolean;
+  storageError: string | null;
   capabilities: StorageCapabilities;
   backendChecks: StorageDiagnosticCheck[];
   repositoryChecks: StorageDiagnosticCheck[];
@@ -139,20 +150,54 @@ async function timedCheck(
   }
 }
 
-function getBackendChecks(capabilities: StorageCapabilities): StorageDiagnosticCheck[] {
+function getBackendChecks(
+  capabilities: StorageCapabilities,
+  input: {
+    storageReady: boolean;
+    storageError: string | null;
+  }
+): StorageDiagnosticCheck[] {
   const backend = resolveDatabaseBackend();
   const postgres = getDirectPostgresConnectionState();
+  const runtime = getRuntimeStorageResolution();
+  const activeProvider = runtime?.activeProvider ?? backend.provider;
+  const preferredProvider = runtime?.preferredProvider ?? backend.provider;
+  const activeReason = runtime?.activeReason ?? backend.reason;
 
   const checks: StorageDiagnosticCheck[] = [
     {
       id: "backend-provider",
       label: "当前后端",
-      status: "pass",
-      detail: `当前解析结果为 ${backend.provider}，来源：${backend.reason}`,
+      status: input.storageReady ? "pass" : "fail",
+      detail: input.storageReady
+        ? `当前实际后端为 ${activeProvider}，来源：${activeReason}`
+        : `当前目标后端为 ${activeProvider}，但初始化未完成，来源：${activeReason}`,
     },
   ];
 
-  if (backend.provider === "sqlite") {
+  if (runtime?.isBlocked) {
+    checks.push({
+      id: "backend-blocked",
+      label: runtime.isFailover ? "故障切换已阻断" : "后端初始化已阻断",
+      status: "fail",
+      detail: runtime.isFailover
+        ? `首选后端 ${preferredProvider} 失败后，Postgres 兜底也未能完成初始化，因此应用保持阻断状态。`
+        : `首选后端 ${preferredProvider} 未能完成初始化；存在远端后端配置时不会自动切到可写 SQLite。`,
+      hint: input.storageError ?? runtime.failoverError ?? "请先修复当前首选后端或补齐远端兜底配置。",
+    });
+  } else if (runtime?.isFailover) {
+    checks.push({
+      id: "backend-failover",
+      label: "受控故障切换",
+      status: "warn",
+      detail: `首选后端 ${preferredProvider} 初始化失败，当前已受控切换到 ${activeProvider}。`,
+      hint: runtime.failoverError
+        ? `最近一次主后端失败信息：${runtime.failoverError}`
+        : "当前未记录主后端错误详情。",
+    });
+  }
+
+  if (activeProvider === "sqlite") {
     checks.push({
       id: "backend-sqlite-path",
       label: "SQLite 文件路径",
@@ -162,7 +207,7 @@ function getBackendChecks(capabilities: StorageCapabilities): StorageDiagnosticC
     });
   }
 
-  if (backend.provider === "postgres") {
+  if (activeProvider === "postgres") {
     checks.push({
       id: "backend-postgres-source",
       label: "Postgres 连接来源",
@@ -238,23 +283,52 @@ async function getRepositoryChecks(storage: ControlPlaneStorage): Promise<Storag
 
 export async function runStorageDiagnostics(): Promise<StorageDiagnosticsReport> {
   const backend = resolveDatabaseBackend();
-  const capabilities = backend.capabilities;
-  const storage = await getControlPlaneStorage();
-  const [repositoryChecks, supabaseReport] = await Promise.all([
-    getRepositoryChecks(storage),
-    capabilities.supabaseDiagnostics ? runSupabaseDiagnostics() : Promise.resolve(null),
-  ]);
+  let storage: ControlPlaneStorage | null = null;
+  let storageReady = false;
+  let storageError: string | null = null;
+
+  try {
+    storage = await getControlPlaneStorage();
+    storageReady = true;
+  } catch (error) {
+    storageError = getErrorMessage(error);
+  }
+
+  const runtime = getRuntimeStorageResolution();
+  const capabilities = storage?.capabilities ?? getStorageCapabilities();
+  const [repositoryChecks, supabaseReport] = storageReady && storage
+    ? await Promise.all([
+        getRepositoryChecks(storage),
+        capabilities.supabaseDiagnostics ? runSupabaseDiagnostics() : Promise.resolve(null),
+      ])
+    : [[
+        {
+          id: "repo-storage-init",
+          label: "存储初始化",
+          status: "fail" as const,
+          detail: storageError
+            ? `当前后端未能完成初始化：${storageError}`
+            : "当前后端未能完成初始化。",
+          hint: runtime?.isBlocked
+            ? "项目已保持阻断状态，不会在存在远端配置时改用可写 SQLite。"
+            : "请检查当前存储后端配置、凭据或数据库可用性。",
+        },
+      ], null];
 
   return {
     generatedAt: new Date().toISOString(),
-    provider: backend.provider,
-    resolutionReason: backend.reason,
-    sqliteFilePath: backend.provider === "sqlite" ? backend.sqliteFilePath : null,
-    postgresConnectionSource:
-      backend.provider === "postgres" ? backend.postgresConnectionSource : null,
-    storageReady: true,
+    provider: runtime?.activeProvider ?? backend.provider,
+    resolutionReason: runtime?.activeReason ?? backend.reason,
+    preferredProvider: runtime?.preferredProvider ?? backend.provider,
+    preferredReason: runtime?.preferredReason ?? backend.reason,
+    isFailover: runtime?.isFailover ?? false,
+    failoverError: runtime?.failoverError ?? null,
+    sqliteFilePath: (runtime?.activeProvider ?? backend.provider) === "sqlite" ? backend.sqliteFilePath : null,
+    postgresConnectionSource: runtime?.postgresConnectionSource ?? backend.postgresConnectionSource,
+    storageReady,
+    storageError,
     capabilities,
-    backendChecks: getBackendChecks(capabilities),
+    backendChecks: getBackendChecks(capabilities, {storageReady, storageError}),
     repositoryChecks,
     capabilityItems: buildCapabilityItems(capabilities),
     supabaseReport,

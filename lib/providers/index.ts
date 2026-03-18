@@ -10,13 +10,15 @@ import { getCheckConcurrency } from "../core/polling-config";
 
 // 最多尝试 3 次：初始一次 + 2 次重试
 const MAX_REQUEST_ABORT_RETRIES = 2;
-const REQUEST_ABORTED_PATTERN = /request was aborted\.?/i;
+const TRANSIENT_FAILURE_PATTERN =
+  /request was aborted\.?|timeout|请求超时|No output generated|回复为空|server_error|temporarily unavailable|overloaded/i;
 
-function shouldRetryRequestAborted(message: string | undefined): boolean {
-  if (!message) {
+function shouldRetryTransientFailure(...messages: Array<string | undefined>): boolean {
+  const combined = messages.filter(Boolean).join("\n");
+  if (!combined) {
     return false;
   }
-  return REQUEST_ABORTED_PATTERN.test(message);
+  return TRANSIENT_FAILURE_PATTERN.test(combined);
 }
 
 async function checkWithRetry(config: ProviderConfig): Promise<CheckResult> {
@@ -24,12 +26,12 @@ async function checkWithRetry(config: ProviderConfig): Promise<CheckResult> {
     try {
       const result = await checkWithAiSdk(config);
       if (
-        result.status === "failed" &&
-        shouldRetryRequestAborted(result.message) &&
+        (result.status === "failed" || result.status === "error") &&
+        shouldRetryTransientFailure(result.message, result.logMessage) &&
         attempt < MAX_REQUEST_ABORT_RETRIES
       ) {
         console.warn(
-          `[check-cx] ${config.name} 请求异常（Request was aborted），正在重试第 ${
+          `[check-cx] ${config.name} 请求异常（${result.message}），正在重试第 ${
             attempt + 2
           } 次`
         );
@@ -39,11 +41,11 @@ async function checkWithRetry(config: ProviderConfig): Promise<CheckResult> {
     } catch (error) {
       const message = getErrorMessage(error);
       if (
-        shouldRetryRequestAborted(message) &&
+        shouldRetryTransientFailure(message) &&
         attempt < MAX_REQUEST_ABORT_RETRIES
       ) {
         console.warn(
-          `[check-cx] ${config.name} 请求异常（Request was aborted），正在重试第 ${
+          `[check-cx] ${config.name} 请求异常（${message}），正在重试第 ${
             attempt + 2
           } 次`
         );

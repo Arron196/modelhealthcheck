@@ -38,6 +38,7 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV HOSTNAME="0.0.0.0"
 ENV PORT=3000
+ENV NEXT_TELEMETRY_DISABLED=1
 
 # 创建非 root 用户
 RUN addgroup --system --gid 1001 nodejs && \
@@ -48,8 +49,7 @@ COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/public ./public
 
-# 设置权限
-RUN chown -R nextjs:nodejs /app
+RUN mkdir -p /app/.sisyphus/local-data && chown -R nextjs:nodejs /app
 
 USER nextjs
 

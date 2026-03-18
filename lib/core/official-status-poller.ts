@@ -7,7 +7,6 @@ import type {OfficialStatusResult, ProviderType} from "../types";
 import {checkAllOfficialStatuses} from "../official-status";
 import {getOfficialStatusIntervalMs} from "./polling-config";
 import {logError} from "../utils/error-handler";
-import {ensurePollerLeadership, isPollerLeader} from "./poller-leadership";
 
 declare global {
   // 缓存所有 Provider 的最新官方状态
@@ -16,7 +15,7 @@ declare global {
     | Map<ProviderType, OfficialStatusResult>
     | undefined;
   // 官方状态轮询器定时器实例
-  var __checkCxOfficialStatusTimer: NodeJS.Timeout | undefined;
+  var __checkCxOfficialStatusTimer: ReturnType<typeof setInterval> | undefined;
   // 标记当前是否已有轮询检查在进行，避免并发
   var __checkCxOfficialStatusPolling: boolean | undefined;
 }
@@ -28,11 +27,11 @@ function getOfficialStatusCache(): Map<ProviderType, OfficialStatusResult> {
   return globalThis.__CHECK_CX_OFFICIAL_STATUS_CACHE__;
 }
 
-function getOfficialStatusTimer(): NodeJS.Timeout | null {
+function getOfficialStatusTimer(): ReturnType<typeof setInterval> | null {
   return globalThis.__checkCxOfficialStatusTimer ?? null;
 }
 
-function setOfficialStatusTimer(timer: NodeJS.Timeout | null): void {
+function setOfficialStatusTimer(timer: ReturnType<typeof setInterval> | null): void {
   if (timer) {
     globalThis.__checkCxOfficialStatusTimer = timer;
   } else {
@@ -80,15 +79,6 @@ export function getAllOfficialStatuses(): Map<
  * 更新所有 Provider 的官方状态缓存
  */
 async function runOfficialStatusCheck(): Promise<void> {
-  try {
-    await ensurePollerLeadership();
-  } catch (error) {
-    logError("runOfficialStatusCheck.leadership", error);
-    return;
-  }
-  if (!isPollerLeader()) {
-    return;
-  }
   if (isOfficialStatusPolling()) {
     console.log(
       "[官方状态] 跳过本次检查(上次检查仍在进行中)..."
@@ -136,9 +126,6 @@ export function startOfficialStatusPoller(): void {
     return;
   }
 
-  ensurePollerLeadership().catch((error) => {
-    logError("startOfficialStatusPoller.leadership", error);
-  });
   const intervalMs = getOfficialStatusIntervalMs();
   console.log(
     `[官方状态] 启动轮询器,间隔 ${intervalMs / 1000} 秒...`

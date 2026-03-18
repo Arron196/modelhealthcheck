@@ -11,6 +11,7 @@ import {loadGroupInfos} from "../database/group-info";
 import {getAvailabilityStats} from "../database/availability";
 import {getPollingIntervalLabel, getPollingIntervalMs} from "./polling-config";
 import {ensureOfficialStatusPoller} from "./official-status-poller";
+import {ensureCheckPoller} from "./poller";
 import {buildProviderTimelines, loadSnapshotForScope} from "./health-snapshot-service";
 import type {AvailabilityPeriod, DashboardData, GroupInfoSummary, RefreshMode,} from "../types";
 
@@ -96,6 +97,7 @@ export interface DashboardLoadResult {
 export async function loadDashboardData(options?: {
   refreshMode?: RefreshMode;
   trendPeriod?: AvailabilityPeriod;
+  bypassCache?: boolean;
 }): Promise<DashboardData> {
   const result = await loadDashboardDataInternal(options);
   return result.data;
@@ -104,6 +106,7 @@ export async function loadDashboardData(options?: {
 export async function loadDashboardDataWithEtag(options?: {
   refreshMode?: RefreshMode;
   trendPeriod?: AvailabilityPeriod;
+  bypassCache?: boolean;
 }): Promise<DashboardLoadResult> {
   return loadDashboardDataInternal(options);
 }
@@ -111,8 +114,10 @@ export async function loadDashboardDataWithEtag(options?: {
 async function loadDashboardDataInternal(options?: {
   refreshMode?: RefreshMode;
   trendPeriod?: AvailabilityPeriod;
+  bypassCache?: boolean;
 }): Promise<DashboardLoadResult> {
   ensureOfficialStatusPoller();
+  ensureCheckPoller();
   const allConfigs = await loadProviderConfigsFromDB();
   const maintenanceConfigs = allConfigs.filter((cfg) => cfg.is_maintenance);
   const activeConfigs = allConfigs.filter((cfg) => !cfg.is_maintenance);
@@ -132,7 +137,7 @@ async function loadDashboardDataInternal(options?: {
   );
   const cacheTtlMs = getDashboardCacheTtlMs(pollIntervalMs);
   const now = Date.now();
-  const shouldBypassCache = refreshMode === "always";
+  const shouldBypassCache = refreshMode === "always" || options?.bypassCache === true;
 
   const loadData = async (): Promise<DashboardLoadResult> => {
     const history = await loadSnapshotForScope(

@@ -27,6 +27,7 @@ import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import type { CheckResult, HealthStatus, ProviderConfig } from "../types";
 import { DEFAULT_ENDPOINTS } from "../types";
 import { getSanitizedErrorDetail } from "../utils";
+import { normalizeProviderEndpoint } from "./endpoint-utils";
 import { generateChallenge, validateResponse } from "./challenge";
 import { measureEndpointPing } from "./endpoint-ping";
 
@@ -192,6 +193,13 @@ const REASONING_MODEL_PATTERNS = [
   /\bqwq/i,
 ];
 
+function getDefaultReasoningEffort(modelId: string): ReasoningEffort {
+  if (/\bgpt-5/i.test(modelId)) {
+    return "low";
+  }
+  return "medium";
+}
+
 /**
  * 解析模型名称中的推理强度指令
  *
@@ -222,10 +230,9 @@ function parseModelDirective(model: string): {
     };
   }
 
-  // 推理模型默认使用 medium
   const isReasoningModel = REASONING_MODEL_PATTERNS.some((pattern) => pattern.test(trimmed));
   if (isReasoningModel) {
-    return { modelId: trimmed, reasoningEffort: "medium" };
+    return { modelId: trimmed, reasoningEffort: getDefaultReasoningEffort(trimmed) };
   }
 
   return { modelId: trimmed };
@@ -316,7 +323,10 @@ function createCustomFetch(
  * @throws 当 Provider 类型不支持时抛出错误
  */
 function createModel(config: ProviderConfig) {
-  const endpoint = config.endpoint?.trim() || DEFAULT_ENDPOINTS[config.type];
+  const endpoint = normalizeProviderEndpoint(
+    config.type,
+    config.endpoint?.trim() || DEFAULT_ENDPOINTS[config.type]
+  );
   const baseURL = deriveBaseURL(endpoint);
   const { modelId, reasoningEffort } = parseModelDirective(config.model);
 
@@ -535,13 +545,38 @@ export async function checkWithAiSdk(config: ProviderConfig): Promise<CheckResul
       },
     });
 
-    // 收集完整响应
-    let collectedResponse = "";
-    for await (const chunk of result.textStream) {
-      collectedResponse += chunk;
-    }
+    const streamObservationPromise = (async () => {
+      let firstChunkLatencyMs: number | null = null;
+      let streamedText = "";
 
-    const latencyMs = Date.now() - startedAt;
+      try {
+        for await (const chunk of result.textStream) {
+          if (!chunk) {
+            continue;
+          }
+          if (firstChunkLatencyMs === null) {
+            firstChunkLatencyMs = Date.now() - startedAt;
+          }
+          streamedText += chunk;
+        }
+      } catch (error) {
+        streamError ??= error as AIApiCallError;
+      }
+
+      return {
+        firstChunkLatencyMs,
+        streamedText,
+      };
+    })();
+
+    const [streamObservation, completedText] = await Promise.all([
+      streamObservationPromise,
+      result.text,
+    ]);
+
+    const completionLatencyMs = Date.now() - startedAt;
+    const latencyMs = streamObservation.firstChunkLatencyMs ?? completionLatencyMs;
+    const collectedResponse = completedText.trim() || streamObservation.streamedText.trim();
     const params = await buildParams();
 
     // 检查流处理过程中是否有错误
@@ -557,7 +592,17 @@ export async function checkWithAiSdk(config: ProviderConfig): Promise<CheckResul
 
     // 空回复
     if (!collectedResponse.trim()) {
-      return buildCheckResult(params, "failed", latencyMs, "回复为空");
+      const finishReason = await result.finishReason.catch(() => undefined);
+      if (controller.signal.aborted) {
+        return buildCheckResult(params, "failed", latencyMs, "请求超时");
+      }
+
+      return buildCheckResult(
+        params,
+        "failed",
+        latencyMs,
+        finishReason ? `回复为空（finishReason: ${finishReason}）` : "回复为空"
+      );
     }
 
     // 验证答案
@@ -579,7 +624,14 @@ export async function checkWithAiSdk(config: ProviderConfig): Promise<CheckResul
 
     // 判定健康状态
     const status: HealthStatus = latencyMs <= DEGRADED_THRESHOLD_MS ? "operational" : "degraded";
-    const message = status === "degraded" ? `响应成功但耗时 ${latencyMs}ms` : `验证通过 (${latencyMs}ms)`;
+    const message =
+      status === "degraded"
+        ? completionLatencyMs > latencyMs
+          ? `首字响应 ${latencyMs}ms，完整耗时 ${completionLatencyMs}ms`
+          : `响应成功但耗时 ${latencyMs}ms`
+        : completionLatencyMs > latencyMs
+          ? `验证通过 (${latencyMs}ms，完整耗时 ${completionLatencyMs}ms)`
+          : `验证通过 (${latencyMs}ms)`;
 
     return buildCheckResult(params, status, latencyMs, message);
   } catch (error) {

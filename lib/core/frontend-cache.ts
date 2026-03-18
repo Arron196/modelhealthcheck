@@ -173,12 +173,16 @@ export async function prefetchDashboardData(
 async function fetchFromNetwork(
   trendPeriod: AvailabilityPeriod,
   etag?: string,
-  forceFresh?: boolean
+  forceFresh?: boolean,
+  bypassCache?: boolean
 ): Promise<{ data: DashboardData | null; etag?: string }> {
   const params = new URLSearchParams({ trendPeriod });
   if (forceFresh) {
     params.set("forceRefresh", "1");
     params.set("_t", String(Date.now()));
+  }
+  if (bypassCache) {
+    params.set("bypassCache", "1");
   }
 
   const headers: HeadersInit = {};
@@ -220,7 +224,7 @@ function revalidateInBackground(
     return;
   }
 
-  const request = fetchFromNetwork(trendPeriod, etag, false)
+  const request = fetchFromNetwork(trendPeriod, etag, false, true)
     .then(({ data, etag: newEtag }) => {
       if (data) {
         setCache(trendPeriod, data, newEtag);
