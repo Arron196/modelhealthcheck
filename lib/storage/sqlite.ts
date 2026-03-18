@@ -9,6 +9,7 @@ import {getErrorMessage} from "@/lib/utils";
 
 import {
   createStorageId,
+  getDefaultRequestTemplateRows,
   getDefaultSiteSettingsRow,
   mapAdminUserRecord,
   mapCheckConfigRow,
@@ -121,6 +122,34 @@ export function createSqliteControlPlaneStorage(filePath: string): ControlPlaneS
           defaults.created_at,
           defaults.updated_at
         );
+
+        const templateStatement = db.prepare(
+          `
+            INSERT INTO check_request_templates (
+              id,
+              name,
+              type,
+              request_header,
+              metadata,
+              created_at,
+              updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO NOTHING
+          `
+        );
+
+        for (const template of getDefaultRequestTemplateRows()) {
+          templateStatement.run(
+            template.id,
+            template.name,
+            template.type,
+            serializeJson(template.request_header),
+            serializeJson(template.metadata),
+            template.created_at,
+            template.updated_at
+          );
+        }
       })
       .catch((error) => {
         readyPromise = null;

@@ -172,6 +172,24 @@ export const SQLITE_CONTROL_PLANE_SCHEMA_STATEMENTS = [
   `,
 ] as const;
 
+const DEFAULT_REQUEST_TEMPLATE_DEFINITIONS = [
+  {
+    id: "8e6d6289-b8c8-4b8e-90f6-96e51ec87f01",
+    name: "OpenAI Yes/No Arithmetic",
+    type: "openai",
+  },
+  {
+    id: "8e6d6289-b8c8-4b8e-90f6-96e51ec87f02",
+    name: "Anthropic Yes/No Arithmetic",
+    type: "anthropic",
+  },
+  {
+    id: "8e6d6289-b8c8-4b8e-90f6-96e51ec87f03",
+    name: "Gemini Yes/No Arithmetic",
+    type: "gemini",
+  },
+] as const;
+
 export function createStorageId(): string {
   return randomUUID();
 }
@@ -267,6 +285,32 @@ export function getDefaultSiteSettingsRow(): SiteSettingsRow {
     created_at: timestamp,
     updated_at: timestamp,
   };
+}
+
+export function getDefaultRequestTemplateRows(): CheckRequestTemplateRow[] {
+  const timestamp = nowIso();
+
+  return DEFAULT_REQUEST_TEMPLATE_DEFINITIONS.map((template) => ({
+    id: template.id,
+    name: template.name,
+    type: template.type,
+    request_header: null,
+    metadata: {
+      checkCx: {
+        challengeMode: "yes_no_arithmetic",
+        promptInstruction:
+          "Read the arithmetic statement and answer with ONLY yes or no in lowercase.",
+        cases: [
+          {expression: "1 + 1", claimedAnswer: 2, expectedAnswer: "yes"},
+          {expression: "1 + 2", claimedAnswer: 4, expectedAnswer: "no"},
+          {expression: "2 + 2", claimedAnswer: 4, expectedAnswer: "yes"},
+          {expression: "3 - 1", claimedAnswer: 1, expectedAnswer: "no"},
+        ],
+      },
+    },
+    created_at: timestamp,
+    updated_at: timestamp,
+  }));
 }
 
 export function mapAdminUserRecord(row: LooseRow): AdminUserRecord {

@@ -13,6 +13,7 @@ import type {
   StorageCapabilities,
 } from "./types";
 import {
+  getDefaultRequestTemplateRows,
   mapAdminUserRecord,
   mapCheckConfigRow,
   mapGroupInfoRow,
@@ -42,12 +43,46 @@ function wrapStorageError(action: string, error: unknown): never {
 }
 
 export function createSupabaseControlPlaneStorage(): ControlPlaneStorage {
+  let readyPromise: Promise<void> | null = null;
+
+  async function ensureReady(): Promise<void> {
+    if (readyPromise) {
+      return readyPromise;
+    }
+
+    readyPromise = (async () => {
+      const client = createAdminClient();
+      const {error} = await client
+        .from("check_request_templates")
+        .upsert(
+          getDefaultRequestTemplateRows().map((template) => ({
+            id: template.id,
+            name: template.name,
+            type: template.type,
+            request_header: template.request_header,
+            metadata: template.metadata,
+          })),
+          {onConflict: "id", ignoreDuplicates: true}
+        );
+
+      if (error) {
+        wrapStorageError("初始化默认请求模板", error);
+      }
+    })().catch((error) => {
+      readyPromise = null;
+      throw error;
+    });
+
+    return readyPromise;
+  }
+
   return {
     provider: "supabase",
     capabilities,
-    async ensureReady() {},
+    ensureReady,
     adminUsers: {
       async hasAny() {
+        await ensureReady();
         const client = createAdminClient();
         const {data, error} = await client.from("admin_users").select("id").limit(1);
 
@@ -58,6 +93,7 @@ export function createSupabaseControlPlaneStorage(): ControlPlaneStorage {
         return Boolean(data && data.length > 0);
       },
       async findByUsername(username) {
+        await ensureReady();
         const client = createAdminClient();
         const {data, error} = await client
           .from("admin_users")
@@ -72,6 +108,7 @@ export function createSupabaseControlPlaneStorage(): ControlPlaneStorage {
         return data ? mapAdminUserRecord(data as Record<string, unknown>) : null;
       },
       async create(input) {
+        await ensureReady();
         const client = createAdminClient();
         const {data, error} = await client
           .from("admin_users")
@@ -90,6 +127,7 @@ export function createSupabaseControlPlaneStorage(): ControlPlaneStorage {
         return mapAdminUserRecord(data as Record<string, unknown>);
       },
       async updateLastLoginAt(id, lastLoginAt) {
+        await ensureReady();
         const client = createAdminClient();
         const {error} = await client
           .from("admin_users")
@@ -103,6 +141,7 @@ export function createSupabaseControlPlaneStorage(): ControlPlaneStorage {
     },
     siteSettings: {
       async getSingleton(singletonKey) {
+        await ensureReady();
         const client = createAdminClient();
         const {data, error} = await client
           .from("site_settings")
@@ -119,6 +158,7 @@ export function createSupabaseControlPlaneStorage(): ControlPlaneStorage {
         return data ? mapSiteSettingsRow(data as Record<string, unknown>) : null;
       },
       async upsert(input: SiteSettingsMutationInput) {
+        await ensureReady();
         const client = createAdminClient();
         const {error} = await client
           .from("site_settings")
@@ -131,6 +171,7 @@ export function createSupabaseControlPlaneStorage(): ControlPlaneStorage {
     },
     checkConfigs: {
       async list(input) {
+        await ensureReady();
         const client = createAdminClient();
         let query = client
           .from("check_configs")
@@ -153,6 +194,7 @@ export function createSupabaseControlPlaneStorage(): ControlPlaneStorage {
         return ((data as Array<Record<string, unknown>> | null) ?? []).map(mapCheckConfigRow);
       },
       async getById(id) {
+        await ensureReady();
         const client = createAdminClient();
         const {data, error} = await client
           .from("check_configs")
@@ -169,6 +211,7 @@ export function createSupabaseControlPlaneStorage(): ControlPlaneStorage {
         return data ? mapCheckConfigRow(data as Record<string, unknown>) : null;
       },
       async upsert(input: CheckConfigMutationInput) {
+        await ensureReady();
         const client = createAdminClient();
         const payload = {
           name: input.name,
@@ -194,6 +237,7 @@ export function createSupabaseControlPlaneStorage(): ControlPlaneStorage {
         }
       },
       async delete(id) {
+        await ensureReady();
         const client = createAdminClient();
         const {error} = await client.from("check_configs").delete().eq("id", id);
 
@@ -204,6 +248,7 @@ export function createSupabaseControlPlaneStorage(): ControlPlaneStorage {
     },
     requestTemplates: {
       async list() {
+        await ensureReady();
         const client = createAdminClient();
         const {data, error} = await client
           .from("check_request_templates")
@@ -218,6 +263,7 @@ export function createSupabaseControlPlaneStorage(): ControlPlaneStorage {
         return ((data as Array<Record<string, unknown>> | null) ?? []).map(mapRequestTemplateRow);
       },
       async upsert(input: RequestTemplateMutationInput) {
+        await ensureReady();
         const client = createAdminClient();
         const payload = {
           name: input.name,
@@ -235,6 +281,7 @@ export function createSupabaseControlPlaneStorage(): ControlPlaneStorage {
         }
       },
       async delete(id) {
+        await ensureReady();
         const client = createAdminClient();
         const {error} = await client.from("check_request_templates").delete().eq("id", id);
 
@@ -245,6 +292,7 @@ export function createSupabaseControlPlaneStorage(): ControlPlaneStorage {
     },
     groups: {
       async list() {
+        await ensureReady();
         const client = createAdminClient();
         const {data, error} = await client
           .from("group_info")
@@ -258,6 +306,7 @@ export function createSupabaseControlPlaneStorage(): ControlPlaneStorage {
         return ((data as Array<Record<string, unknown>> | null) ?? []).map(mapGroupInfoRow);
       },
       async getByName(groupName) {
+        await ensureReady();
         const client = createAdminClient();
         const {data, error} = await client
           .from("group_info")
@@ -272,6 +321,7 @@ export function createSupabaseControlPlaneStorage(): ControlPlaneStorage {
         return data ? mapGroupInfoRow(data as Record<string, unknown>) : null;
       },
       async upsert(input: GroupMutationInput) {
+        await ensureReady();
         const client = createAdminClient();
         const payload = {
           group_name: input.group_name,
@@ -288,6 +338,7 @@ export function createSupabaseControlPlaneStorage(): ControlPlaneStorage {
         }
       },
       async delete(id) {
+        await ensureReady();
         const client = createAdminClient();
         const {error} = await client.from("group_info").delete().eq("id", id);
 
@@ -298,6 +349,7 @@ export function createSupabaseControlPlaneStorage(): ControlPlaneStorage {
     },
     notifications: {
       async list() {
+        await ensureReady();
         const client = createAdminClient();
         const {data, error} = await client
           .from("system_notifications")
@@ -311,6 +363,7 @@ export function createSupabaseControlPlaneStorage(): ControlPlaneStorage {
         return ((data as Array<Record<string, unknown>> | null) ?? []).map(mapNotificationRow);
       },
       async listActive() {
+        await ensureReady();
         const client = createAdminClient();
         const {data, error} = await client
           .from("system_notifications")
@@ -325,6 +378,7 @@ export function createSupabaseControlPlaneStorage(): ControlPlaneStorage {
         return ((data as Array<Record<string, unknown>> | null) ?? []).map(mapNotificationRow);
       },
       async upsert(input: NotificationMutationInput) {
+        await ensureReady();
         const client = createAdminClient();
         const payload = {
           message: input.message,
@@ -341,6 +395,7 @@ export function createSupabaseControlPlaneStorage(): ControlPlaneStorage {
         }
       },
       async delete(id) {
+        await ensureReady();
         const client = createAdminClient();
         const {error} = await client.from("system_notifications").delete().eq("id", id);
 

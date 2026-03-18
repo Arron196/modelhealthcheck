@@ -6,6 +6,7 @@ import {getErrorMessage} from "@/lib/utils";
 
 import {
   createStorageId,
+  getDefaultRequestTemplateRows,
   getDefaultSiteSettingsRow,
   mapAdminUserRecord,
   mapCheckConfigRow,
@@ -129,6 +130,33 @@ export function createPostgresControlPlaneStorage(connectionString: string): Con
           defaults.updated_at,
         ]
       );
+
+      for (const template of getDefaultRequestTemplateRows()) {
+        await pool.query(
+          `
+            INSERT INTO check_request_templates (
+              id,
+              name,
+              type,
+              request_header,
+              metadata,
+              created_at,
+              updated_at
+            )
+            VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6, $7)
+            ON CONFLICT (id) DO NOTHING
+          `,
+          [
+            template.id,
+            template.name,
+            template.type,
+            serializeJson(template.request_header),
+            serializeJson(template.metadata),
+            template.created_at,
+            template.updated_at,
+          ]
+        );
+      }
     })().catch((error) => {
       readyPromise = null;
       throw error;
