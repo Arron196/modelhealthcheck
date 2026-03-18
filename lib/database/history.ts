@@ -5,6 +5,7 @@
 import "server-only";
 import type {PostgrestError} from "@supabase/supabase-js";
 import {createAdminClient} from "../supabase/admin";
+import {getStorageCapabilities} from "@/lib/storage/resolver";
 import type {CheckResult, HistorySnapshot} from "../types";
 import {logError} from "../utils";
 
@@ -54,6 +55,10 @@ interface RpcHistoryRow {
  */
 class SnapshotStore {
   async fetch(options?: HistoryQueryOptions): Promise<HistorySnapshot> {
+    if (!getStorageCapabilities().historySnapshots) {
+      return {};
+    }
+
     const normalizedIds = normalizeAllowedIds(options?.allowedIds);
     if (Array.isArray(normalizedIds) && normalizedIds.length === 0) {
       return {};
@@ -81,6 +86,10 @@ class SnapshotStore {
   }
 
   async append(results: CheckResult[]): Promise<void> {
+    if (!getStorageCapabilities().historySnapshots) {
+      return;
+    }
+
     if (results.length === 0) {
       return;
     }
@@ -105,6 +114,10 @@ class SnapshotStore {
   }
 
   async prune(retentionDays: number = HISTORY_RETENTION_DAYS): Promise<void> {
+    if (!getStorageCapabilities().historySnapshots) {
+      return;
+    }
+
     const supabase = createAdminClient();
     await this.pruneInternal(supabase, retentionDays);
   }

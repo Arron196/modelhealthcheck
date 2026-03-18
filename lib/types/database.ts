@@ -81,3 +81,18 @@ export interface SystemNotificationRow {
   level: "info" | "warning" | "error";
   created_at: string;
 }
+
+export interface SiteSettingsRow {
+  singleton_key: string;
+  site_name: string;
+  site_description: string;
+  hero_badge: string;
+  hero_title_primary: string;
+  hero_title_secondary: string;
+  hero_description: string;
+  footer_brand: string;
+  admin_console_title: string;
+  admin_console_description: string;
+  created_at?: string;
+  updated_at?: string;
+}
