@@ -12,9 +12,13 @@ const DEFAULT_PERIOD: AvailabilityPeriod = "7d";
 
 interface GroupDashboardBootstrapProps {
   groupName: string;
+  canForceRefresh: boolean;
 }
 
-export function GroupDashboardBootstrap({ groupName }: GroupDashboardBootstrapProps) {
+export function GroupDashboardBootstrap({
+  groupName,
+  canForceRefresh,
+}: GroupDashboardBootstrapProps) {
   const [data, setData] = useState<GroupDashboardData | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -83,7 +87,7 @@ export function GroupDashboardBootstrap({ groupName }: GroupDashboardBootstrapPr
               <span>{errorMessage}</span>
               <button
                 type="button"
-                onClick={() => loadData(true)}
+                onClick={() => loadData()}
                 className="rounded-full bg-foreground px-3 py-1 text-xs font-medium text-background transition-colors hover:bg-foreground/90"
               >
                 重新加载
@@ -95,5 +99,11 @@ export function GroupDashboardBootstrap({ groupName }: GroupDashboardBootstrapPr
     );
   }
 
-  return <GroupDashboardView groupName={groupName} initialData={data} />;
+  return (
+    <GroupDashboardView
+      groupName={groupName}
+      initialData={data}
+      canForceRefresh={canForceRefresh}
+    />
+  );
 }

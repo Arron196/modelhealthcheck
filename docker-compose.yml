@@ -1,6 +1,9 @@
 services:
   check-cx:
-    image: bingzi233/check-cx:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: check-cx:local
     container_name: check-cx
     restart: unless-stopped
     ports:
@@ -8,4 +11,18 @@ services:
     env_file:
       - .env
     environment:
-      - NODE_ENV=production
+      NODE_ENV: production
+      HOSTNAME: 0.0.0.0
+      PORT: 3000
+      SQLITE_DATABASE_PATH: /app/.sisyphus/local-data/app.db
+    volumes:
+      - check-cx-data:/app/.sisyphus/local-data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then((res) => process.exit(res.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+volumes:
+  check-cx-data:

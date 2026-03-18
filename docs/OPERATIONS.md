@@ -16,11 +16,10 @@
 - `SUPABASE_PUBLISHABLE_OR_ANON_KEY`
 - `SUPABASE_SERVICE_ROLE_KEY`
 
-其中 `SUPABASE_SERVICE_ROLE_KEY` 用于后台轮询、配置加载和租约续租，必须配置在服务端环境中，禁止暴露到客户端。
+其中 `SUPABASE_SERVICE_ROLE_KEY` 用于后台轮询、配置加载与管理端诊断，必须配置在服务端环境中，禁止暴露到客户端。
 
 ### 可选（运行参数）
 
-- `CHECK_NODE_ID`：节点标识（多节点部署必须唯一）
 - `CHECK_POLL_INTERVAL_SECONDS`：检测间隔（15–600 秒）
 - `CHECK_CONCURRENCY`：并发数（1–20）
 - `OFFICIAL_STATUS_CHECK_INTERVAL_SECONDS`：官方状态轮询间隔（60–3600 秒）
@@ -42,7 +41,7 @@
 
 ### 3.3 关键对象
 
-- 表：`check_configs`、`check_history`、`group_info`、`system_notifications`、`check_poller_leases`
+- 表：`check_configs`、`check_history`、`group_info`、`system_notifications`
 - 视图：`availability_stats`
 - RPC：`get_recent_check_history`、`prune_check_history`
 
@@ -54,11 +53,11 @@
 
 - 默认行为：该节点执行轮询并写入历史。
 
-### 4.2 多节点
+### 4.2 Docker Compose
 
-- 使用 `check_poller_leases` 表进行租约选主。
-- 只有 leader 节点执行轮询；standby 节点仅提供读取 API。
-- 必须为每个节点设置唯一 `CHECK_NODE_ID`，避免租约冲突。
+- 仓库根目录已提供 `Dockerfile` 与 `docker-compose.yml`。
+- `docker compose up --build -d` 会直接构建当前仓库并启动单节点轮询实例。
+- 若未配置远端后端，默认 SQLite 路径为 `/app/.sisyphus/local-data/app.db`，Compose 已通过命名卷持久化该目录。
 
 ## 5. 运维操作
 
@@ -105,8 +104,8 @@ SELECT prune_check_history(30);
 
 关键日志（服务端）：
 
-- `[check-cx] 初始化后台轮询器...`
-- `[check-cx] 节点角色切换：standby -> leader ...`
+- `[check-cx] 初始化本地后台轮询器...`
+- `[check-cx] 后台轮询完成：写入 ...`
 - `[check-cx] 本轮检测明细：...`
 - `[官方状态] openai: operational - ...`
 
@@ -130,8 +129,8 @@ SELECT prune_check_history(30);
 - 当前仅 OpenAI/Anthropic 实现官方状态。
 - 检查外网访问是否被阻断或 DNS 被限制。
 
-### 7.4 多节点重复写入
+### 7.4 Docker Compose 中 SQLite 数据丢失
 
-- 确认每个节点 `CHECK_NODE_ID` 唯一。
-- 检查 `check_poller_leases` 是否可写（需 service role key）。
+- 确认使用仓库自带的 `docker-compose.yml`，不要移除 `check-cx-data` 命名卷。
+- 如需手动指定 SQLite 路径，请同步更新 `SQLITE_DATABASE_PATH` 与卷挂载目录。
 

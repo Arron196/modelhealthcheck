@@ -10,7 +10,13 @@ import type {SiteSettings} from "@/lib/types/site-settings";
 
 const DEFAULT_PERIOD: AvailabilityPeriod = "7d";
 
-export function DashboardBootstrap({siteSettings}: {siteSettings: SiteSettings}) {
+export function DashboardBootstrap({
+  siteSettings,
+  canForceRefresh,
+}: {
+  siteSettings: SiteSettings;
+  canForceRefresh: boolean;
+}) {
   const [data, setData] = useState<DashboardData | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -74,7 +80,7 @@ export function DashboardBootstrap({siteSettings}: {siteSettings: SiteSettings})
               <span>{errorMessage}</span>
               <button
                 type="button"
-                onClick={() => loadData(true)}
+                onClick={() => loadData()}
                 className="rounded-full bg-foreground px-3 py-1 text-xs font-medium text-background transition-colors hover:bg-foreground/90"
               >
                 重新加载
@@ -86,5 +92,11 @@ export function DashboardBootstrap({siteSettings}: {siteSettings: SiteSettings})
     );
   }
 
-  return <DashboardView initialData={data} siteSettings={siteSettings} />;
+  return (
+    <DashboardView
+      initialData={data}
+      siteSettings={siteSettings}
+      canForceRefresh={canForceRefresh}
+    />
+  );
 }

@@ -13,12 +13,14 @@ import {
 } from "@/lib/admin/auth";
 import {runSupabaseAutoFix} from "@/lib/admin/supabase-diagnostics";
 import {ADMIN_NOTIFICATION_LEVELS, ADMIN_PROVIDER_TYPES} from "@/lib/admin/data";
+import {invalidateStorageDiagnosticsCache} from "@/lib/admin/storage-diagnostics-cache";
 import {invalidateDashboardCache} from "@/lib/core/dashboard-data";
 import {invalidateConfigCache} from "@/lib/database/config-loader";
 import {invalidateGroupInfoCache} from "@/lib/database/group-info";
 import {invalidateSiteSettingsCache} from "@/lib/site-settings";
 import {getControlPlaneStorage} from "@/lib/storage/resolver";
 import {ensureRuntimeMigrations, invalidateRuntimeMigrationCache} from "@/lib/supabase/runtime-migrations";
+import {normalizeProviderEndpoint} from "@/lib/providers/endpoint-utils";
 import {getErrorMessage, logError} from "@/lib/utils";
 import {SITE_SETTINGS_SINGLETON_KEY} from "@/lib/types/site-settings";
 
@@ -109,6 +111,7 @@ function invalidateOperationalCaches(): void {
   invalidateConfigCache();
   invalidateGroupInfoCache();
   invalidateDashboardCache();
+  invalidateStorageDiagnosticsCache();
   invalidateSiteSettingsCache();
   invalidateRuntimeMigrationCache();
 }
@@ -224,8 +227,8 @@ export async function runSupabaseAutoFixAction(): Promise<never> {
         : "当前没有可自动修复的数据库问题";
 
     invalidateOperationalCaches();
-    revalidateAdminPaths("/admin/supabase");
-    redirect(buildRedirectUrl("/admin/supabase", "success", message));
+    revalidateAdminPaths("/admin/storage");
+    redirect(buildRedirectUrl("/admin/storage", "success", message));
   } catch (error) {
     if (isRedirectError(error)) {
       throw error;
@@ -233,7 +236,7 @@ export async function runSupabaseAutoFixAction(): Promise<never> {
 
     logError("admin action failed: runSupabaseAutoFix", error);
     const message = error instanceof Error ? error.message : getErrorMessage(error);
-    redirect(buildRedirectUrl("/admin/supabase", "error", message));
+    redirect(buildRedirectUrl("/admin/storage", "error", message));
   }
 }
 
@@ -249,10 +252,10 @@ export async function runSupabaseAutoMigrateAction(): Promise<never> {
         : "当前没有待执行的自动迁移";
 
     invalidateOperationalCaches();
-    revalidateAdminPaths("/admin/supabase");
+    revalidateAdminPaths("/admin/storage");
     redirect(
       buildRedirectUrl(
-        "/admin/supabase",
+        "/admin/storage",
         result.blockedReason ? "error" : "success",
         message
       )
@@ -264,7 +267,7 @@ export async function runSupabaseAutoMigrateAction(): Promise<never> {
 
     logError("admin action failed: runSupabaseAutoMigrate", error);
     const message = error instanceof Error ? error.message : getErrorMessage(error);
-    redirect(buildRedirectUrl("/admin/supabase", "error", message));
+    redirect(buildRedirectUrl("/admin/storage", "error", message));
   }
 }
 
@@ -323,12 +326,13 @@ export async function upsertConfigAction(formData: FormData): Promise<never> {
     }
 
     ensureProviderType(type);
+    const normalizedEndpoint = normalizeProviderEndpoint(type, endpoint);
 
     const payload = {
       name,
       type,
       model,
-      endpoint,
+      endpoint: normalizedEndpoint,
       api_key: await resolveApiKey(formData, id),
       enabled: getBoolean(formData, "enabled"),
       is_maintenance: getBoolean(formData, "is_maintenance"),

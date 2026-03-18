@@ -10,6 +10,7 @@ import {getGroupInfo} from "../database/group-info";
 import {getAvailabilityStats} from "../database/availability";
 import {getPollingIntervalLabel, getPollingIntervalMs} from "./polling-config";
 import {ensureOfficialStatusPoller} from "./official-status-poller";
+import {ensureCheckPoller} from "./poller";
 import {buildProviderTimelines, loadSnapshotForScope} from "./health-snapshot-service";
 import type {AvailabilityPeriod, AvailabilityStatsMap, ProviderTimeline, RefreshMode} from "../types";
 import {UNGROUPED_DISPLAY_NAME, UNGROUPED_KEY} from "../types";
@@ -90,9 +91,10 @@ export async function getAvailableGroups(): Promise<string[]> {
  */
 export async function loadGroupDashboardData(
   targetGroupName: string,
-  options?: { refreshMode?: RefreshMode; trendPeriod?: AvailabilityPeriod }
+  options?: { refreshMode?: RefreshMode; trendPeriod?: AvailabilityPeriod; bypassCache?: boolean }
 ): Promise<GroupDashboardData | null> {
   ensureOfficialStatusPoller();
+  ensureCheckPoller();
 
   const allConfigs = await loadProviderConfigsFromDB();
 
@@ -129,7 +131,7 @@ export async function loadGroupDashboardData(
   );
   const cacheTtlMs = getGroupCacheTtlMs(pollIntervalMs);
   const now = Date.now();
-  const shouldBypassCache = refreshMode === "always";
+  const shouldBypassCache = refreshMode === "always" || options?.bypassCache === true;
 
   const loadData = async (): Promise<GroupDashboardData | null> => {
     const history = await loadSnapshotForScope(

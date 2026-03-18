@@ -158,12 +158,16 @@ async function fetchFromNetwork(
   groupName: string,
   trendPeriod: AvailabilityPeriod,
   etag?: string,
-  forceFresh?: boolean
+  forceFresh?: boolean,
+  bypassCache?: boolean
 ): Promise<{ data: GroupDashboardData | null; etag?: string }> {
   const params = new URLSearchParams({ trendPeriod });
   if (forceFresh) {
     params.set("forceRefresh", "1");
     params.set("_t", String(Date.now()));
+  }
+  if (bypassCache) {
+    params.set("bypassCache", "1");
   }
 
   const headers: HeadersInit = {};
@@ -202,7 +206,7 @@ function revalidateInBackground(
     return;
   }
 
-  const request = fetchFromNetwork(groupName, trendPeriod, etag)
+  const request = fetchFromNetwork(groupName, trendPeriod, etag, false, true)
     .then(({ data, etag: newEtag }) => {
       if (data) {
         setGroupCache(groupName, trendPeriod, data, newEtag);

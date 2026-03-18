@@ -65,10 +65,10 @@ export default async function AdminConfigsPage({searchParams}: AdminConfigsPageP
                 <AdminInput name="model" placeholder="gpt-4o-mini" required />
               </AdminField>
 
-              <AdminField label="接口地址">
+              <AdminField label="接口地址" description="OpenAI 支持 /v1/chat/completions 和 /v1/responses；保存时会自动纠正常见拼写错误。">
                 <AdminInput
                   name="endpoint"
-                  placeholder="https://api.openai.com/v1/chat/completions"
+                  placeholder="https://api.openai.com/v1/responses"
                   required
                 />
               </AdminField>

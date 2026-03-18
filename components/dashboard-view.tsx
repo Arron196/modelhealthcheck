@@ -1,6 +1,6 @@
 "use client";
 
-import {useCallback, useEffect, useMemo, useState} from "react";
+import {useCallback, useEffect, useMemo, useRef, useState} from "react";
 import {fetchWithCache, prefetchDashboardData, setCache} from "@/lib/core/frontend-cache";
 import {prefetchGroupData} from "@/lib/core/group-frontend-cache";
 import Link from "next/link";
@@ -53,6 +53,7 @@ interface DashboardViewProps {
   /** 首屏由服务端注入的聚合数据，用作前端轮询的初始快照 */
   initialData: DashboardData;
   siteSettings: SiteSettings;
+  canForceRefresh: boolean;
 }
 
 /** 计算所有 Provider 中最近一次检查的时间戳（毫秒） */
@@ -76,6 +77,8 @@ const computeRemainingMs = (
   const remaining = pollIntervalMs - (clock - latestCheckTimestamp);
   return Math.max(0, remaining);
 };
+
+const AUTO_SYNC_RETRY_MS = 5_000;
 
 const PERIOD_OPTIONS: Array<{ value: AvailabilityPeriod; label: string }> = [
   { value: "7d", label: "7 天" },
@@ -333,11 +336,20 @@ function GroupPanel({
  * - 负责渲染整体头部统计与 Provider 卡片
  * - 在浏览器端按 pollIntervalMs 定时拉取 /api/dashboard 并维护倒计时
  */
-export function DashboardView({ initialData, siteSettings }: DashboardViewProps) {
+export function DashboardView({
+  initialData,
+  siteSettings,
+  canForceRefresh,
+}: DashboardViewProps) {
   const [data, setData] = useState(initialData);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const refreshLockRef = useRef(false);
+  const autoSyncRetryAtRef = useRef(0);
+  const [nextRefreshAnchor, setNextRefreshAnchor] = useState<number | null>(() =>
+    getLatestCheckTimestamp(initialData.providerTimelines)
+  );
   const [timeToNextRefresh, setTimeToNextRefresh] = useState<number | null>(() =>
     computeRemainingMs(
       initialData.pollIntervalMs,
@@ -376,11 +388,6 @@ export function DashboardView({ initialData, siteSettings }: DashboardViewProps)
   // Initialize order with default data
   const [orderedGroupNames, setOrderedGroupNames] = useState<string[]>(() => 
     initialGroupedTimelines.map((g) => g.groupName)
-  );
-
-  const latestCheckTimestamp = useMemo(
-    () => getLatestCheckTimestamp(data.providerTimelines),
-    [data.providerTimelines]
   );
 
   const sensors = useSensors(
@@ -503,28 +510,39 @@ export function DashboardView({ initialData, siteSettings }: DashboardViewProps)
       forceFresh?: boolean,
       revalidateIfFresh?: boolean
     ) => {
+    if (refreshLockRef.current) {
+      return;
+    }
+    refreshLockRef.current = true;
     setIsRefreshing(true);
     try {
       const targetPeriod = period ?? selectedPeriod;
-      const result = await fetchWithCache({
-        trendPeriod: targetPeriod,
-        forceFresh,
-        revalidateIfFresh,
-        onBackgroundUpdate: (newData) => {
-          // SWR 模式：后台刷新完成后更新 UI
-          setData(newData);
-        },
-      });
-      setData(result.data);
+        const result = await fetchWithCache({
+          trendPeriod: targetPeriod,
+          forceFresh,
+          revalidateIfFresh,
+          onBackgroundUpdate: (newData) => {
+            // SWR 模式：后台刷新完成后更新 UI
+            autoSyncRetryAtRef.current = 0;
+            setNextRefreshAnchor(getLatestCheckTimestamp(newData.providerTimelines));
+            setData(newData);
+          },
+        });
+        autoSyncRetryAtRef.current = 0;
+        setNextRefreshAnchor(getLatestCheckTimestamp(result.data.providerTimelines));
+        setData(result.data);
     } catch (error) {
       console.error("[check-cx] 刷新失败", error);
     } finally {
       setIsRefreshing(false);
+      refreshLockRef.current = false;
     }
   }, [selectedPeriod]);
 
   useEffect(() => {
     setData(initialData);
+    autoSyncRetryAtRef.current = 0;
+    setNextRefreshAnchor(getLatestCheckTimestamp(initialData.providerTimelines));
     // 将服务端数据放入前端缓存
     if (initialData.trendPeriod) {
       setCache(initialData.trendPeriod, initialData);
@@ -568,16 +586,6 @@ export function DashboardView({ initialData, siteSettings }: DashboardViewProps)
   }, [isCoarsePointer]);
 
   useEffect(() => {
-    if (!data.pollIntervalMs || data.pollIntervalMs <= 0) {
-      return;
-    }
-    const timer = window.setInterval(() => {
-      refresh(undefined, false, true).catch(() => undefined);
-    }, data.pollIntervalMs);
-    return () => window.clearInterval(timer);
-  }, [data.pollIntervalMs, refresh]);
-
-  useEffect(() => {
     if (selectedPeriod === data.trendPeriod) {
       return;
     }
@@ -585,19 +593,40 @@ export function DashboardView({ initialData, siteSettings }: DashboardViewProps)
   }, [data.trendPeriod, refresh, selectedPeriod]);
 
   useEffect(() => {
-    if (!data.pollIntervalMs || data.pollIntervalMs <= 0 || latestCheckTimestamp === null) {
+    if (!data.pollIntervalMs || data.pollIntervalMs <= 0 || nextRefreshAnchor === null) {
       setTimeToNextRefresh(null);
       return;
     }
     const updateCountdown = () => {
-      setTimeToNextRefresh(
-        computeRemainingMs(data.pollIntervalMs, latestCheckTimestamp)
-      );
+      const now = Date.now();
+      const remaining = computeRemainingMs(data.pollIntervalMs, nextRefreshAnchor, now);
+
+      if (remaining === null) {
+        setTimeToNextRefresh(null);
+        return;
+      }
+
+      if (remaining > 0) {
+        setTimeToNextRefresh(remaining);
+        return;
+      }
+
+      if (autoSyncRetryAtRef.current > now) {
+        setTimeToNextRefresh(autoSyncRetryAtRef.current - now);
+        return;
+      }
+
+      autoSyncRetryAtRef.current = now + AUTO_SYNC_RETRY_MS;
+      setTimeToNextRefresh(AUTO_SYNC_RETRY_MS);
+
+      if (!refreshLockRef.current) {
+        refresh(undefined, false, true).catch(() => undefined);
+      }
     };
     updateCountdown();
     const countdownTimer = window.setInterval(updateCountdown, 1000);
     return () => window.clearInterval(countdownTimer);
-  }, [data.pollIntervalMs, latestCheckTimestamp]);
+  }, [data.pollIntervalMs, nextRefreshAnchor, refresh]);
 
   // 根据卡片数量决定宽屏列数
   const gridColsClass = useMemo(() => {
@@ -919,19 +948,21 @@ export function DashboardView({ initialData, siteSettings }: DashboardViewProps)
                 </div>
                 <span className="opacity-30">|</span>
                 <span>{pollIntervalLabel} 轮询</span>
-                <button
-                  type="button"
-                  onClick={() => refresh(selectedPeriod, true)}
-                  disabled={isRefreshing}
-                  className={cn(
-                    "rounded-full border border-border/60 px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground transition-colors hover:border-border/80 hover:text-foreground",
-                    isRefreshing && "cursor-not-allowed opacity-60"
-                  )}
-                >
-                  刷新
-                </button>
-             </div>
-           )}
+                {canForceRefresh ? (
+                  <button
+                    type="button"
+                    onClick={() => refresh(selectedPeriod, true)}
+                    disabled={isRefreshing}
+                    className={cn(
+                      "rounded-full border border-border/60 px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground transition-colors hover:border-border/80 hover:text-foreground",
+                      isRefreshing && "cursor-not-allowed opacity-60"
+                    )}
+                  >
+                    刷新
+                  </button>
+                ) : null}
+              </div>
+            )}
         </div>
       </header>
 
