@@ -42,6 +42,7 @@ const DEGRADED_THRESHOLD_MS = 6_000;
 
 /** 需要从 metadata 中排除的字段，这些字段会与 streamText 内部参数冲突 */
 const EXCLUDED_METADATA_KEYS = new Set(["model", "prompt", "messages", "abortSignal"]);
+const INTERNAL_METADATA_KEYS = new Set(["checkCx"]);
 
 /** 用于从完整端点 URL 中提取 baseURL 的正则表达式 */
 const API_PATH_SUFFIX_REGEX = /\/(chat\/completions|responses|messages)\/?$/;
@@ -246,7 +247,9 @@ function filterMetadata(
   if (!metadata) return null;
 
   const filtered = Object.fromEntries(
-    Object.entries(metadata).filter(([key]) => !EXCLUDED_METADATA_KEYS.has(key))
+    Object.entries(metadata).filter(
+      ([key]) => !EXCLUDED_METADATA_KEYS.has(key) && !INTERNAL_METADATA_KEYS.has(key)
+    )
   );
 
   return Object.keys(filtered).length > 0 ? filtered : null;
@@ -501,7 +504,7 @@ export async function checkWithAiSdk(config: ProviderConfig): Promise<CheckResul
 
   const displayEndpoint = config.endpoint || DEFAULT_ENDPOINTS[config.type];
   const pingPromise = measureEndpointPing(displayEndpoint);
-  const challenge = generateChallenge();
+  const challenge = generateChallenge(config.metadata);
 
   // 构建结果参数的辅助函数
   const buildParams = async (): Promise<ResultBuilderParams> => ({
@@ -558,7 +561,11 @@ export async function checkWithAiSdk(config: ProviderConfig): Promise<CheckResul
     }
 
     // 验证答案
-    const { valid, extractedNumbers } = validateResponse(collectedResponse, challenge.expectedAnswer);
+    const { valid, extractedNumbers } = validateResponse(
+      collectedResponse,
+      challenge.expectedAnswer,
+      config.metadata
+    );
 
     if (!valid) {
       const actualNumbers = extractedNumbers?.join(", ") || "(无数字)";
