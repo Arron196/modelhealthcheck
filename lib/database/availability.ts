@@ -6,6 +6,7 @@ import "server-only";
 
 import {createAdminClient} from "../supabase/admin";
 import {getPollingIntervalMs} from "../core/polling-config";
+import {getStorageCapabilities} from "@/lib/storage/resolver";
 import type {AvailabilityStats} from "../types/database";
 import type {AvailabilityStat, AvailabilityStatsMap} from "../types";
 import {logError} from "../utils";
@@ -93,6 +94,10 @@ function mapRows(rows: AvailabilityStats[] | null): AvailabilityStatsMap {
 export async function getAvailabilityStats(
   configIds?: Iterable<string> | null
 ): Promise<AvailabilityStatsMap> {
+  if (!getStorageCapabilities().availabilityStats) {
+    return {};
+  }
+
   const normalizedIds = normalizeIds(configIds);
   if (Array.isArray(normalizedIds) && normalizedIds.length === 0) {
     return {};

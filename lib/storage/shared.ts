@@ -1,0 +1,350 @@
+import "server-only";
+
+import {randomUUID} from "node:crypto";
+
+import {DEFAULT_SITE_SETTINGS, SITE_SETTINGS_SINGLETON_KEY} from "@/lib/types/site-settings";
+import type {
+  CheckRequestTemplateRow,
+  GroupInfoRow,
+  SiteSettingsRow,
+  SystemNotificationRow,
+} from "@/lib/types/database";
+
+import type {AdminUserRecord, StoredCheckConfigRow} from "./types";
+
+type LooseRow = Record<string, unknown>;
+
+export const POSTGRES_CONTROL_PLANE_SCHEMA_STATEMENTS = [
+  `
+    CREATE TABLE IF NOT EXISTS admin_users (
+      id uuid PRIMARY KEY,
+      username text NOT NULL UNIQUE,
+      password_hash text NOT NULL,
+      last_login_at timestamptz,
+      created_at timestamptz NOT NULL DEFAULT timezone('utc', now()),
+      updated_at timestamptz NOT NULL DEFAULT timezone('utc', now())
+    )
+  `,
+  `
+    CREATE TABLE IF NOT EXISTS check_request_templates (
+      id uuid PRIMARY KEY,
+      name text NOT NULL UNIQUE,
+      type text NOT NULL,
+      request_header jsonb,
+      metadata jsonb,
+      created_at timestamptz NOT NULL DEFAULT timezone('utc', now()),
+      updated_at timestamptz NOT NULL DEFAULT timezone('utc', now())
+    )
+  `,
+  `
+    CREATE TABLE IF NOT EXISTS check_configs (
+      id uuid PRIMARY KEY,
+      name text NOT NULL,
+      type text NOT NULL,
+      model text NOT NULL,
+      endpoint text NOT NULL,
+      api_key text NOT NULL,
+      enabled boolean NOT NULL DEFAULT true,
+      is_maintenance boolean NOT NULL DEFAULT false,
+      template_id uuid REFERENCES check_request_templates(id) ON DELETE SET NULL,
+      request_header jsonb,
+      metadata jsonb,
+      group_name text,
+      created_at timestamptz NOT NULL DEFAULT timezone('utc', now()),
+      updated_at timestamptz NOT NULL DEFAULT timezone('utc', now())
+    )
+  `,
+  `CREATE INDEX IF NOT EXISTS idx_check_configs_template_id ON check_configs (template_id)`,
+  `
+    CREATE TABLE IF NOT EXISTS group_info (
+      id uuid PRIMARY KEY,
+      group_name text NOT NULL UNIQUE,
+      website_url text,
+      tags text NOT NULL DEFAULT '',
+      created_at timestamptz NOT NULL DEFAULT timezone('utc', now()),
+      updated_at timestamptz NOT NULL DEFAULT timezone('utc', now())
+    )
+  `,
+  `
+    CREATE TABLE IF NOT EXISTS system_notifications (
+      id uuid PRIMARY KEY,
+      message text NOT NULL,
+      is_active boolean NOT NULL DEFAULT true,
+      level text NOT NULL DEFAULT 'info',
+      created_at timestamptz NOT NULL DEFAULT timezone('utc', now())
+    )
+  `,
+  `
+    CREATE TABLE IF NOT EXISTS site_settings (
+      singleton_key text PRIMARY KEY CHECK (singleton_key = 'global'),
+      site_name text NOT NULL,
+      site_description text NOT NULL,
+      hero_badge text NOT NULL,
+      hero_title_primary text NOT NULL,
+      hero_title_secondary text NOT NULL,
+      hero_description text NOT NULL,
+      footer_brand text NOT NULL,
+      admin_console_title text NOT NULL,
+      admin_console_description text NOT NULL,
+      created_at timestamptz NOT NULL DEFAULT timezone('utc', now()),
+      updated_at timestamptz NOT NULL DEFAULT timezone('utc', now())
+    )
+  `,
+] as const;
+
+export const SQLITE_CONTROL_PLANE_SCHEMA_STATEMENTS = [
+  `PRAGMA foreign_keys = ON`,
+  `PRAGMA journal_mode = WAL`,
+  `
+    CREATE TABLE IF NOT EXISTS admin_users (
+      id text PRIMARY KEY,
+      username text NOT NULL UNIQUE,
+      password_hash text NOT NULL,
+      last_login_at text,
+      created_at text NOT NULL,
+      updated_at text NOT NULL
+    )
+  `,
+  `
+    CREATE TABLE IF NOT EXISTS check_request_templates (
+      id text PRIMARY KEY,
+      name text NOT NULL UNIQUE,
+      type text NOT NULL,
+      request_header text,
+      metadata text,
+      created_at text NOT NULL,
+      updated_at text NOT NULL
+    )
+  `,
+  `
+    CREATE TABLE IF NOT EXISTS check_configs (
+      id text PRIMARY KEY,
+      name text NOT NULL,
+      type text NOT NULL,
+      model text NOT NULL,
+      endpoint text NOT NULL,
+      api_key text NOT NULL,
+      enabled integer NOT NULL DEFAULT 1,
+      is_maintenance integer NOT NULL DEFAULT 0,
+      template_id text REFERENCES check_request_templates(id) ON DELETE SET NULL,
+      request_header text,
+      metadata text,
+      group_name text,
+      created_at text NOT NULL,
+      updated_at text NOT NULL
+    )
+  `,
+  `CREATE INDEX IF NOT EXISTS idx_check_configs_template_id ON check_configs (template_id)`,
+  `
+    CREATE TABLE IF NOT EXISTS group_info (
+      id text PRIMARY KEY,
+      group_name text NOT NULL UNIQUE,
+      website_url text,
+      tags text NOT NULL DEFAULT '',
+      created_at text NOT NULL,
+      updated_at text NOT NULL
+    )
+  `,
+  `
+    CREATE TABLE IF NOT EXISTS system_notifications (
+      id text PRIMARY KEY,
+      message text NOT NULL,
+      is_active integer NOT NULL DEFAULT 1,
+      level text NOT NULL DEFAULT 'info',
+      created_at text NOT NULL
+    )
+  `,
+  `
+    CREATE TABLE IF NOT EXISTS site_settings (
+      singleton_key text PRIMARY KEY CHECK (singleton_key = 'global'),
+      site_name text NOT NULL,
+      site_description text NOT NULL,
+      hero_badge text NOT NULL,
+      hero_title_primary text NOT NULL,
+      hero_title_secondary text NOT NULL,
+      hero_description text NOT NULL,
+      footer_brand text NOT NULL,
+      admin_console_title text NOT NULL,
+      admin_console_description text NOT NULL,
+      created_at text NOT NULL,
+      updated_at text NOT NULL
+    )
+  `,
+] as const;
+
+export function createStorageId(): string {
+  return randomUUID();
+}
+
+export function nowIso(): string {
+  return new Date().toISOString();
+}
+
+export function serializeJson(value: Record<string, unknown> | null | undefined): string | null {
+  if (!value) {
+    return null;
+  }
+
+  return JSON.stringify(value);
+}
+
+export function parseJsonObject<T extends Record<string, unknown>>(
+  value: unknown
+): T | null {
+  if (!value) {
+    return null;
+  }
+
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        return null;
+      }
+      return parsed as T;
+    } catch {
+      return null;
+    }
+  }
+
+  if (typeof value === "object" && !Array.isArray(value)) {
+    return value as T;
+  }
+
+  return null;
+}
+
+function toOptionalString(value: unknown): string | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+
+  if (typeof value === "string") {
+    return value;
+  }
+
+  return String(value);
+}
+
+function toRequiredString(value: unknown): string {
+  return toOptionalString(value) ?? "";
+}
+
+function toBoolean(value: unknown): boolean {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (typeof value === "number") {
+    return value !== 0;
+  }
+
+  if (typeof value === "string") {
+    return value === "true" || value === "1";
+  }
+
+  return false;
+}
+
+export function getDefaultSiteSettingsRow(): SiteSettingsRow {
+  const timestamp = nowIso();
+
+  return {
+    singleton_key: SITE_SETTINGS_SINGLETON_KEY,
+    site_name: DEFAULT_SITE_SETTINGS.siteName,
+    site_description: DEFAULT_SITE_SETTINGS.siteDescription,
+    hero_badge: DEFAULT_SITE_SETTINGS.heroBadge,
+    hero_title_primary: DEFAULT_SITE_SETTINGS.heroTitlePrimary,
+    hero_title_secondary: DEFAULT_SITE_SETTINGS.heroTitleSecondary,
+    hero_description: DEFAULT_SITE_SETTINGS.heroDescription,
+    footer_brand: DEFAULT_SITE_SETTINGS.footerBrand,
+    admin_console_title: DEFAULT_SITE_SETTINGS.adminConsoleTitle,
+    admin_console_description: DEFAULT_SITE_SETTINGS.adminConsoleDescription,
+    created_at: timestamp,
+    updated_at: timestamp,
+  };
+}
+
+export function mapAdminUserRecord(row: LooseRow): AdminUserRecord {
+  return {
+    id: toRequiredString(row.id),
+    username: toRequiredString(row.username),
+    password_hash: toRequiredString(row.password_hash),
+    last_login_at: toOptionalString(row.last_login_at),
+    created_at: toOptionalString(row.created_at),
+    updated_at: toOptionalString(row.updated_at),
+  };
+}
+
+export function mapCheckConfigRow(row: LooseRow): StoredCheckConfigRow {
+  return {
+    id: toRequiredString(row.id),
+    name: toRequiredString(row.name),
+    type: toRequiredString(row.type),
+    model: toRequiredString(row.model),
+    endpoint: toRequiredString(row.endpoint),
+    api_key: toRequiredString(row.api_key),
+    enabled: toBoolean(row.enabled),
+    is_maintenance: toBoolean(row.is_maintenance),
+    template_id: toOptionalString(row.template_id),
+    request_header: parseJsonObject<Record<string, string>>(row.request_header),
+    metadata: parseJsonObject<Record<string, unknown>>(row.metadata),
+    group_name: toOptionalString(row.group_name),
+    created_at: toOptionalString(row.created_at) ?? undefined,
+    updated_at: toOptionalString(row.updated_at),
+  };
+}
+
+export function mapRequestTemplateRow(row: LooseRow): CheckRequestTemplateRow {
+  return {
+    id: toRequiredString(row.id),
+    name: toRequiredString(row.name),
+    type: toRequiredString(row.type),
+    request_header: parseJsonObject<Record<string, string>>(row.request_header),
+    metadata: parseJsonObject<Record<string, unknown>>(row.metadata),
+    created_at: toOptionalString(row.created_at) ?? undefined,
+    updated_at: toOptionalString(row.updated_at) ?? undefined,
+  };
+}
+
+export function mapGroupInfoRow(row: LooseRow): GroupInfoRow {
+  return {
+    id: toRequiredString(row.id),
+    group_name: toRequiredString(row.group_name),
+    website_url: toOptionalString(row.website_url),
+    tags: toOptionalString(row.tags),
+    created_at: toOptionalString(row.created_at) ?? undefined,
+    updated_at: toOptionalString(row.updated_at) ?? undefined,
+  };
+}
+
+export function mapNotificationRow(row: LooseRow): SystemNotificationRow {
+  return {
+    id: toRequiredString(row.id),
+    message: toRequiredString(row.message),
+    is_active: toBoolean(row.is_active),
+    level: toRequiredString(row.level) as SystemNotificationRow["level"],
+    created_at: toRequiredString(row.created_at),
+  };
+}
+
+export function mapSiteSettingsRow(row: LooseRow): SiteSettingsRow {
+  return {
+    singleton_key: toRequiredString(row.singleton_key),
+    site_name: toRequiredString(row.site_name),
+    site_description: toRequiredString(row.site_description),
+    hero_badge: toRequiredString(row.hero_badge),
+    hero_title_primary: toRequiredString(row.hero_title_primary),
+    hero_title_secondary: toRequiredString(row.hero_title_secondary),
+    hero_description: toRequiredString(row.hero_description),
+    footer_brand: toRequiredString(row.footer_brand),
+    admin_console_title: toRequiredString(row.admin_console_title),
+    admin_console_description: toRequiredString(row.admin_console_description),
+    created_at: toOptionalString(row.created_at) ?? undefined,
+    updated_at: toOptionalString(row.updated_at) ?? undefined,
+  };
+}

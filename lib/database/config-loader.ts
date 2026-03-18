@@ -3,10 +3,10 @@
  */
 
 import "server-only";
-import {createAdminClient} from "../supabase/admin";
 import {getPollingIntervalMs} from "../core/polling-config";
 import type {CheckConfigRow, ProviderConfig, ProviderType} from "../types";
 import type {CheckRequestTemplateRow} from "../types/database";
+import {getControlPlaneStorage} from "@/lib/storage/resolver";
 import {logError} from "../utils";
 
 interface ConfigCache {
@@ -24,9 +24,7 @@ type TemplateProjection = Pick<CheckRequestTemplateRow, "type" | "request_header
 type ConfigRowWithTemplate = Pick<
   CheckConfigRow,
   "id" | "name" | "type" | "model" | "endpoint" | "api_key" | "is_maintenance" | "template_id" | "request_header" | "metadata" | "group_name"
-> & {
-  check_request_templates?: TemplateProjection | TemplateProjection[] | null;
-};
+>;
 
 const cache: ConfigCache = {
   data: [],
@@ -37,6 +35,11 @@ const metrics: ConfigCacheMetrics = {
   hits: 0,
   misses: 0,
 };
+
+export function invalidateConfigCache(): void {
+  cache.data = [];
+  cache.lastFetchedAt = 0;
+}
 
 export function getConfigCacheMetrics(): ConfigCacheMetrics {
   return { ...metrics };
@@ -68,11 +71,15 @@ function mergeTemplateAndConfig(templateValue: unknown, configValue: unknown): J
   };
 }
 
-function getTemplate(row: ConfigRowWithTemplate): TemplateProjection | null {
-  const template = Array.isArray(row.check_request_templates)
-    ? row.check_request_templates[0]
-    : row.check_request_templates;
+function getTemplate(
+  row: ConfigRowWithTemplate,
+  templateMap: ReadonlyMap<string, TemplateProjection>
+): TemplateProjection | null {
+  if (!row.template_id) {
+    return null;
+  }
 
+  const template = templateMap.get(row.template_id);
   if (!template || template.type !== row.type) {
     return null;
   }
@@ -96,30 +103,33 @@ export async function loadProviderConfigsFromDB(options?: {
     }
     metrics.misses += 1;
 
-    const supabase = createAdminClient();
-    const { data, error } = await supabase
-      .from("check_configs")
-      .select(
-        "id, name, type, model, endpoint, api_key, is_maintenance, template_id, request_header, metadata, group_name, check_request_templates(type, request_header, metadata)"
-      )
-      .eq("enabled", true)
-      .order("id");
+    const storage = await getControlPlaneStorage();
+    const [data, templates] = await Promise.all([
+      storage.checkConfigs.list({enabledOnly: true}),
+      storage.requestTemplates.list(),
+    ]);
 
-    if (error) {
-      logError("从数据库加载配置失败", error);
-      return [];
-    }
-
-    if (!data || data.length === 0) {
+    if (data.length === 0) {
       console.warn("[check-cx] 数据库中没有找到启用的配置");
       cache.data = [];
       cache.lastFetchedAt = now;
       return [];
     }
 
+    const templateMap = new Map<string, TemplateProjection>(
+      templates.map((template) => [
+        template.id,
+        {
+          type: template.type,
+          request_header: template.request_header,
+          metadata: template.metadata,
+        },
+      ])
+    );
+
     const configs: ProviderConfig[] = data.map(
       (row: ConfigRowWithTemplate) => {
-        const template = getTemplate(row);
+        const template = getTemplate(row, templateMap);
         const mergedRequestHeaders = mergeTemplateAndConfig(template?.request_header, row.request_header) as Record<string, string> | null;
         const mergedMetadata = mergeTemplateAndConfig(template?.metadata, row.metadata);
 

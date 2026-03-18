@@ -1,6 +1,6 @@
 import "server-only";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { getPollingIntervalMs } from "@/lib/core/polling-config";
+import { getControlPlaneStorage } from "@/lib/storage/resolver";
 import type { GroupInfoRow } from "@/lib/types/database";
 
 interface GroupInfoCache {
@@ -22,6 +22,11 @@ const metrics: GroupInfoCacheMetrics = {
   hits: 0,
   misses: 0,
 };
+
+export function invalidateGroupInfoCache(): void {
+  cache.data = [];
+  cache.lastFetchedAt = 0;
+}
 
 export function getGroupInfoCacheMetrics(): GroupInfoCacheMetrics {
   return { ...metrics };
@@ -46,22 +51,16 @@ export async function loadGroupInfos(options?: {
   }
   metrics.misses += 1;
 
-  const supabase = createAdminClient();
-
-  const { data, error } = await supabase
-    .from("group_info")
-    .select("*")
-    .order("group_name", { ascending: true });
-
-  if (error) {
+  try {
+    const storage = await getControlPlaneStorage();
+    const rows = await storage.groups.list();
+    cache.data = rows;
+    cache.lastFetchedAt = now;
+    return rows;
+  } catch (error) {
     console.error("Failed to load group info:", error);
     return [];
   }
-
-  const rows = (data as GroupInfoRow[]) ?? [];
-  cache.data = rows;
-  cache.lastFetchedAt = now;
-  return rows;
 }
 
 /**

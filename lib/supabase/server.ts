@@ -1,8 +1,7 @@
 import {createServerClient} from '@supabase/ssr'
 import {cookies} from 'next/headers'
 
-// 开发模式使用 dev schema，生产模式使用 public schema
-const DB_SCHEMA = process.env.NODE_ENV === 'development' ? 'dev' : 'public'
+const DB_SCHEMA = process.env.SUPABASE_DB_SCHEMA?.trim() || 'public'
 
 /**
  * If using Fluid compute: Don't put this client in a global variable. Always create a new client within each
