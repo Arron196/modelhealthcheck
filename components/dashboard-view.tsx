@@ -37,6 +37,7 @@ import {ProviderCard} from "@/components/provider-card";
 import {ThemeToggle} from "@/components/theme-toggle";
 import {Collapsible, CollapsibleContent, CollapsibleTrigger} from "@/components/ui/collapsible";
 import {ClientTime} from "@/components/client-time";
+import type {SiteSettings} from "@/lib/types/site-settings";
 import type {
   AvailabilityPeriod,
   AvailabilityStatsMap,
@@ -51,6 +52,7 @@ import {parseTagList, getTagColorClass} from "@/lib/utils/tag-colors";
 interface DashboardViewProps {
   /** 首屏由服务端注入的聚合数据，用作前端轮询的初始快照 */
   initialData: DashboardData;
+  siteSettings: SiteSettings;
 }
 
 /** 计算所有 Provider 中最近一次检查的时间戳（毫秒） */
@@ -331,7 +333,7 @@ function GroupPanel({
  * - 负责渲染整体头部统计与 Provider 卡片
  * - 在浏览器端按 pollIntervalMs 定时拉取 /api/dashboard 并维护倒计时
  */
-export function DashboardView({ initialData }: DashboardViewProps) {
+export function DashboardView({ initialData, siteSettings }: DashboardViewProps) {
   const [data, setData] = useState(initialData);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -768,9 +770,9 @@ export function DashboardView({ initialData }: DashboardViewProps) {
             <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-foreground text-background sm:h-8 sm:w-8">
               <Activity className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
             </div>
-            <span className="text-xs font-bold uppercase tracking-widest text-muted-foreground sm:text-sm">
-              System Status
-            </span>
+             <span className="text-xs font-bold uppercase tracking-widest text-muted-foreground sm:text-sm">
+               {siteSettings.heroBadge}
+             </span>
             <div className="h-3 w-[1px] bg-border/60 sm:h-4" />
             <Link
               href="https://github.com/BingZi-233/check-cx"
@@ -785,17 +787,13 @@ export function DashboardView({ initialData }: DashboardViewProps) {
           </div>
           
           <h1 className="max-w-2xl text-3xl font-extrabold leading-tight tracking-tight sm:text-5xl md:text-6xl">
-            AI SERVICES <br />
-            <span className="text-muted-foreground">INTELLIGENCE MONITOR</span>
+             {siteSettings.heroTitlePrimary} <br />
+             <span className="text-muted-foreground">{siteSettings.heroTitleSecondary}</span>
           </h1>
           
           <div className="flex max-w-lg flex-col gap-2 text-sm text-muted-foreground sm:text-base">
-             <p className="leading-relaxed">
-               实时追踪各大 AI 模型对话接口的可用性、延迟与官方服务状态。
-               <br />
-               Advanced performance metrics for next-gen intelligence.
-             </p>
-          </div>
+             <p className="whitespace-pre-line leading-relaxed">{siteSettings.heroDescription}</p>
+           </div>
         </div>
 
         <div className="flex flex-col items-start gap-3 sm:gap-4 lg:items-end">

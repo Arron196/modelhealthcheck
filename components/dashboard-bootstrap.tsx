@@ -6,10 +6,11 @@ import {DashboardView} from "@/components/dashboard-view";
 import {DashboardSkeleton} from "@/components/dashboard-skeleton";
 import {fetchWithCache} from "@/lib/core/frontend-cache";
 import type {AvailabilityPeriod, DashboardData} from "@/lib/types";
+import type {SiteSettings} from "@/lib/types/site-settings";
 
 const DEFAULT_PERIOD: AvailabilityPeriod = "7d";
 
-export function DashboardBootstrap() {
+export function DashboardBootstrap({siteSettings}: {siteSettings: SiteSettings}) {
   const [data, setData] = useState<DashboardData | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -85,5 +86,5 @@ export function DashboardBootstrap() {
     );
   }
 
-  return <DashboardView initialData={data} />;
+  return <DashboardView initialData={data} siteSettings={siteSettings} />;
 }

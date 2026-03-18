@@ -1,23 +1,35 @@
+import Link from "next/link";
+
 import {DashboardBootstrap} from "@/components/dashboard-bootstrap";
 import {ClientYear} from "@/components/client-time";
 import packageJson from "@/package.json";
+import {loadSiteSettings} from "@/lib/site-settings";
 
 const ESTIMATED_VERSION = `v${packageJson.version}`;
 
-export default function Home() {
+export default async function Home() {
+  const siteSettings = await loadSiteSettings();
+
   return (
     <div className="py-8 md:py-16">
       <main className="mx-auto flex w-full max-w-[1600px] flex-col gap-6 px-3 sm:gap-8 sm:px-6 lg:px-12">
-        <DashboardBootstrap />
+        <DashboardBootstrap siteSettings={siteSettings} />
       </main>
       
       <footer className="mt-16 border-t border-border/40">
         <div className="mx-auto flex w-full max-w-[1600px] flex-col items-center justify-between gap-4 px-3 py-6 sm:flex-row sm:px-6 lg:px-12">
           <div className="text-sm text-muted-foreground">
-            © <ClientYear placeholder="2026" /> Check CX. All rights reserved.
+            © <ClientYear placeholder="2026" /> {siteSettings.footerBrand}. All rights reserved.
           </div>
 
           <div className="flex items-center gap-4">
+            <Link
+              href="/admin"
+              className="inline-flex items-center gap-2 rounded-full border border-border/40 bg-background/60 px-3 py-1 text-xs text-muted-foreground shadow-sm transition hover:border-border/80 hover:text-foreground"
+            >
+              <span className="font-medium opacity-70">Console</span>
+              <span>Admin</span>
+            </Link>
             <div className="inline-flex items-center gap-2 rounded-full border border-border/40 bg-background/60 px-3 py-1 text-xs text-muted-foreground shadow-sm transition hover:border-border/80 hover:text-foreground">
               <span className="font-medium opacity-70">Ver.</span>
               <span className="font-mono">{ESTIMATED_VERSION}</span>

@@ -46,6 +46,10 @@ export function resetDashboardCacheMetrics(): void {
 const DEFAULT_DASHBOARD_CACHE_TTL_MS = 5 * 60 * 1000;
 const dashboardCache = new Map<string, DashboardCacheEntry>();
 
+export function invalidateDashboardCache(): void {
+  dashboardCache.clear();
+}
+
 function getDashboardCacheKey(
   pollIntervalMs: number,
   providerKey: string,
