@@ -1,4 +1,4 @@
-import {ArrowRight, BellRing, Boxes, Database, FolderTree, Layers3, Settings2} from "lucide-react";
+import {ArrowRight, BellRing, Boxes, Database, FolderTree, HardDrive, Layers3, Settings2} from "lucide-react";
 import Link from "next/link";
 
 import {AdminActionLink, AdminPageIntro, AdminPanel, AdminStatCard} from "@/components/admin/admin-primitives";
@@ -35,9 +35,15 @@ const SECTION_LINKS = [
     icon: BellRing,
   },
   {
+    href: "/admin/storage",
+    label: "存储诊断",
+    summary: "查看当前后端解析结果、能力矩阵以及控制面仓库健康状态。",
+    icon: HardDrive,
+  },
+  {
     href: "/admin/supabase",
-    label: "Supabase 诊断",
-    summary: "自动检查环境变量、连通性、权限和关键表/视图状态。",
+    label: "Supabase 专诊",
+    summary: "当实际后端为 Supabase 时，查看更细的环境、关系与自动修复信息。",
     icon: Database,
   },
   {
@@ -58,7 +64,7 @@ export default async function AdminOverviewPage() {
         eyebrow="Admin / Overview"
         title="后台管理控制台"
         description="这里不是另起一套后台风格，而是沿用主站的圆角、玻璃感和科技标记语言，把运行配置、模板、分组和公告放进一个统一维护面板。"
-        actions={<AdminActionLink href="/admin/supabase">进入诊断工具</AdminActionLink>}
+        actions={<AdminActionLink href="/admin/storage">进入诊断工具</AdminActionLink>}
       />
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">

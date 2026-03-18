@@ -3,7 +3,7 @@
 import type {ReactNode} from "react";
 import Link from "next/link";
 import {usePathname} from "next/navigation";
-import {BellRing, Boxes, Database, FolderTree, LayoutDashboard, Layers3, Settings2, ShieldCheck} from "lucide-react";
+import {BellRing, Boxes, Database, FolderTree, HardDrive, LayoutDashboard, Layers3, Settings2, ShieldCheck} from "lucide-react";
 
 import {CornerPlus} from "@/components/admin/admin-primitives";
 import {cn} from "@/lib/utils";
@@ -40,9 +40,15 @@ const NAV_ITEMS = [
     icon: BellRing,
   },
   {
+    href: "/admin/storage",
+    label: "存储诊断",
+    description: "后端解析、能力矩阵与控制面检查",
+    icon: HardDrive,
+  },
+  {
     href: "/admin/supabase",
-    label: "Supabase 诊断",
-    description: "环境、连接与关键对象检查",
+    label: "Supabase 专诊",
+    description: "仅 Supabase 模式显示专项信息",
     icon: Database,
   },
   {
