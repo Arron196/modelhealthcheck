@@ -48,6 +48,7 @@ RUN addgroup --system --gid 1001 nodejs && \
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/public ./public
+COPY --from=builder /app/supabase/migrations ./supabase/migrations
 
 RUN mkdir -p /app/.sisyphus/local-data && chown -R nextjs:nodejs /app
 
