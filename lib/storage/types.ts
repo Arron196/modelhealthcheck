@@ -95,12 +95,14 @@ export interface ControlPlaneStorage {
   ensureReady(): Promise<void>;
   adminUsers: {
     hasAny(): Promise<boolean>;
+    list(): Promise<AdminUserRecord[]>;
     findByUsername(username: string): Promise<AdminUserRecord | null>;
     create(input: {
       username: string;
       passwordHash: string;
       lastLoginAt?: string | null;
     }): Promise<AdminUserRecord>;
+    replaceAll(records: AdminUserRecord[]): Promise<void>;
     updateLastLoginAt(id: string, lastLoginAt: string): Promise<void>;
   };
   siteSettings: {

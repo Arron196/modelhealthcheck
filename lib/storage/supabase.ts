@@ -92,6 +92,20 @@ export function createSupabaseControlPlaneStorage(): ControlPlaneStorage {
 
         return Boolean(data && data.length > 0);
       },
+      async list() {
+        await ensureReady();
+        const client = createAdminClient();
+        const {data, error} = await client
+          .from("admin_users")
+          .select("id, username, password_hash, last_login_at, created_at, updated_at")
+          .order("username", {ascending: true});
+
+        if (error) {
+          wrapStorageError("读取管理员账户列表", error);
+        }
+
+        return ((data as Array<Record<string, unknown>> | null) ?? []).map(mapAdminUserRecord);
+      },
       async findByUsername(username) {
         await ensureReady();
         const client = createAdminClient();
@@ -125,6 +139,44 @@ export function createSupabaseControlPlaneStorage(): ControlPlaneStorage {
         }
 
         return mapAdminUserRecord(data as Record<string, unknown>);
+      },
+      async replaceAll(records) {
+        await ensureReady();
+        const client = createAdminClient();
+        const {data: existingRows, error: existingError} = await client
+          .from("admin_users")
+          .select("id");
+
+        if (existingError) {
+          wrapStorageError("读取管理员账户列表", existingError);
+        }
+
+        const existingIds = ((existingRows as Array<{id: string}> | null) ?? []).map((row) => row.id);
+        if (existingIds.length > 0) {
+          const {error: deleteError} = await client.from("admin_users").delete().in("id", existingIds);
+          if (deleteError) {
+            wrapStorageError("清理管理员账户", deleteError);
+          }
+        }
+
+        if (records.length === 0) {
+          return;
+        }
+
+        const {error: insertError} = await client.from("admin_users").insert(
+          records.map((record) => ({
+            id: record.id,
+            username: record.username,
+            password_hash: record.password_hash,
+            last_login_at: record.last_login_at ?? null,
+            created_at: record.created_at ?? new Date().toISOString(),
+            updated_at: record.updated_at ?? new Date().toISOString(),
+          }))
+        );
+
+        if (insertError) {
+          wrapStorageError("导入管理员账户", insertError);
+        }
       },
       async updateLastLoginAt(id, lastLoginAt) {
         await ensureReady();

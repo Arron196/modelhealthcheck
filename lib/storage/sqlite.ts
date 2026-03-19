@@ -54,6 +54,17 @@ let sqliteCache:
     }
   | null = null;
 
+export function resetSqliteControlPlaneStorageCache(): void {
+  if (sqliteCache) {
+    try {
+      sqliteCache.db.close();
+    } catch {
+    }
+  }
+
+  sqliteCache = null;
+}
+
 function getDatabase(filePath: string): Database.Database {
   if (sqliteCache?.filePath === filePath) {
     return sqliteCache.db;
@@ -175,6 +186,24 @@ export function createSqliteControlPlaneStorage(filePath: string): ControlPlaneS
           wrapError("读取管理员账户", error);
         }
       },
+      async list() {
+        await ensureReady();
+        try {
+          const rows = db
+            .prepare(
+              `
+                SELECT id, username, password_hash, last_login_at, created_at, updated_at
+                FROM admin_users
+                ORDER BY username ASC
+              `
+            )
+            .all() as Array<Record<string, unknown>>;
+
+          return rows.map(mapAdminUserRecord);
+        } catch (error) {
+          wrapError("读取管理员账户列表", error);
+        }
+      },
       async findByUsername(username) {
         await ensureReady();
         try {
@@ -224,6 +253,41 @@ export function createSqliteControlPlaneStorage(filePath: string): ControlPlaneS
           });
         } catch (error) {
           wrapError("创建管理员账户", error);
+        }
+      },
+      async replaceAll(records) {
+        await ensureReady();
+        try {
+          const insertStatement = db.prepare(
+            `
+              INSERT INTO admin_users (
+                id,
+                username,
+                password_hash,
+                last_login_at,
+                created_at,
+                updated_at
+              )
+              VALUES (?, ?, ?, ?, ?, ?)
+            `
+          );
+          const transaction = db.transaction((rows: typeof records) => {
+            db.prepare(`DELETE FROM admin_users`).run();
+            for (const row of rows) {
+              insertStatement.run(
+                row.id,
+                row.username,
+                row.password_hash,
+                row.last_login_at ?? null,
+                row.created_at ?? nowIso(),
+                row.updated_at ?? nowIso()
+              );
+            }
+          });
+
+          transaction(records);
+        } catch (error) {
+          wrapError("导入管理员账户", error);
         }
       },
       async updateLastLoginAt(id, lastLoginAt) {
