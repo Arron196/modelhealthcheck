@@ -1,96 +1,123 @@
 # Check CX 架构说明
 
-本文档描述 Check CX 的整体架构、核心数据流以及模块边界，确保文档与当前实现一致。
+本文档描述当前仓库的整体架构、核心数据流以及模块边界。它对应的是**带后台管理、可切换存储后端、单进程轮询**的当前实现，而不是上游早期的 Supabase-only / 多节点租约版本。
 
 ## 1. 总览
 
-Check CX 由三部分组成：
+Check CX 当前可分为四个运行时层：
 
-1. **Next.js App Router**：提供 Dashboard 页面与 API 路由。
-2. **后台轮询器**：定时执行健康检查，写入当前活动存储后端。
-3. **Supabase 数据层**：存储配置、历史与统计视图。
+1. **Next.js App Router**：提供 Dashboard、分组页、后台管理页与 API 路由。
+2. **后台轮询器**：在单个进程内定时执行健康检查与官方状态抓取。
+3. **控制面存储层**：通过 `lib/storage/resolver.ts` 在 Supabase、直连 Postgres、SQLite 之间解析后端。
+4. **聚合与缓存层**：负责历史快照、统计聚合、ETag 与前端缓存。
 
 核心数据流：
 
-```
-check_configs → 轮询器 → check_history → 聚合快照 → API / 页面渲染
+```text
+check_configs / request_templates / site_settings
+            ↓
+         轮询器
+            ↓
+    可用能力范围内的持久化写入
+            ↓
+   聚合快照 / Dashboard API / Group API / Admin UI
 ```
 
 ## 2. 运行时组件
 
-- **页面与 API**
-  - `app/page.tsx`：SSR 首屏数据（`loadDashboardData(refreshMode="missing")`）。
-  - `app/group/[groupName]/page.tsx`：分组详情页。
-  - `app/api/dashboard/route.ts`：Dashboard 数据 API（ETag + CDN 缓存）。
-  - `app/api/group/[groupName]/route.ts`：分组数据 API。
-  - `app/api/v1/status/route.ts`：对外只读状态 API。
+### 2.1 页面与 API
 
-- **后台轮询器**
-  - `lib/core/poller.ts`：定时执行检查与写入。
-  - `lib/core/official-status-poller.ts`：轮询官方状态并缓存。
+- `app/page.tsx`：Dashboard 首屏 SSR。
+- `app/group/[groupName]/page.tsx`：分组详情页。
+- `app/admin/**`：后台管理控制面，包括登录、配置、模板、通知、分组、存储诊断、站点设置等。
+- `app/api/dashboard/route.ts`：Dashboard 数据 API（ETag + 缓存）。
+- `app/api/group/[groupName]/route.ts`：分组数据 API。
+- `app/api/v1/status/route.ts`：对外只读状态 API。
 
-- **Supabase**
-  - 表：`check_configs`、`check_history`、`group_info`、`system_notifications`。
-  - 视图：`availability_stats`（7/15/30 天可用性统计）。
-  - RPC：`get_recent_check_history`、`prune_check_history`。
+### 2.2 后台轮询器
 
-## 3. 关键数据流
+- `lib/core/poller.ts`：单进程轮询器，负责周期性执行健康检查并写入可用后端。
+- `lib/core/official-status-poller.ts`：轮询 OpenAI / Anthropic 官方状态并做内存缓存。
+- `lib/core/polling-config.ts`：统一管理轮询间隔、官方状态轮询间隔和并发默认值。
 
-1. **配置加载**
-   - `lib/database/config-loader.ts` 读取 `check_configs`（仅 `enabled = true`）。
+### 2.3 控制面存储层
 
-2. **健康检查执行**
-   - `lib/providers/ai-sdk-check.ts` 使用 Vercel AI SDK 调用模型。
-   - 通过数学挑战验证响应，测量首 token 延迟。
-   - `endpoint-ping.ts` 计算 Origin Ping 延迟。
+- `lib/storage/resolver.ts`：解析 `supabase | postgres | sqlite`，并输出当前能力矩阵。
+- `lib/storage/supabase.ts`：完整能力后端，支持控制面、历史快照、可用性统计与 Supabase 专属诊断 / 运行时迁移。
+- `lib/storage/postgres.ts` / `lib/storage/sqlite.ts`：以控制面为主的后端，支持自动建表，但不提供历史快照、可用性统计与租约能力。
 
-3. **历史写入与裁剪**
-   - `lib/database/history.ts` 负责写入 `check_history` 并调用 `prune_check_history`。
-   - 若 RPC 缺失则回退到直连 SQL（性能降低）。
+### 2.4 管理与诊断层
 
-4. **快照与聚合**
-   - `lib/core/health-snapshot-service.ts` 统一读取历史与触发刷新。
-   - `lib/core/dashboard-data.ts`/`group-data.ts` 负责统计数据；Dashboard 分组逻辑已前移到客户端。返回完整时间线与可用性统计。
+- `lib/admin/auth.ts`：管理员账户、Session、Turnstile 集成。
+- `lib/admin/data.ts`：后台数据读写聚合入口。
+- `lib/admin/storage-diagnostics.ts`：存储能力矩阵、运行时迁移与后端诊断信息。
+- `lib/supabase/runtime-migrations.ts`：读取 `RUNTIME_MIGRATIONS` 列出的迁移文件，并执行运行时迁移检查 / 补齐。
 
-5. **对外输出**
-   - Dashboard 页面与 API 均使用聚合数据结构（时间线、可用性统计）。
+## 3. 后端能力矩阵
 
-## 4. 模块边界
+当前后端不是“功能完全等价”的关系，关键差异如下：
 
-- `lib/core/`
-  - 轮询器、选主逻辑、聚合与缓存、轮询配置解析。
-- `lib/providers/`
-  - `ai-sdk-check.ts`：统一的 Provider 检查入口。
-  - `challenge.ts`：数学挑战验证。
-  - `endpoint-ping.ts`：网络层 Ping。
-- `lib/official-status/`
-  - OpenAI / Anthropic 官方状态抓取与解析。
-- `lib/database/`
-  - 配置加载、历史读写、可用性视图、通知与分组信息。
-- `components/`
-  - Dashboard 与分组 UI、时间线、通知横幅等。
+| 能力 | Supabase | Postgres | SQLite |
+|---|---|---|---|
+| 管理员认证 | ✅ | ✅ | ✅ |
+| 检测配置 / 模板 / 分组 / 通知 / 站点设置 | ✅ | ✅ | ✅ |
+| 自动建表（控制面） | ❌ | ✅ | ✅ |
+| 历史快照写入 | ✅ | ❌ | ❌ |
+| 可用性统计视图 | ✅ | ❌ | ❌ |
+| 运行时迁移诊断 / 自动修复 | ✅ | ❌ | ❌ |
+| Supabase 专属诊断 | ✅ | ❌ | ❌ |
 
-## 5. 数据模型与关系
+因此，当前仓库的推荐理解是：
 
-- `check_configs` → `check_history`（`config_id` 外键）
-- `check_configs.group_name` ↔ `group_info.group_name`（分组元数据）
-- `system_notifications` 为前端横幅提供公告
+- **Supabase**：完整能力后端，适合正式部署
+- **Postgres / SQLite**：优先提供控制面与管理后台能力，适合本地、自托管或轻量部署
 
-## 6. 缓存与一致性策略
+## 4. 关键数据流
 
-- **后端快照缓存**：`global-state.ts` 保存最近一次读取的历史快照与刷新时间。
-- **前端缓存**：`frontend-cache.ts` 实现 SWR 风格缓存，并配合 `ETag`。
-- **官方状态缓存**：`official-status-poller.ts` 使用内存 `Map` 缓存结果。
+### 4.1 配置加载
 
-## 7. 本地单进程轮询
+- `lib/database/config-loader.ts` 从当前活动控制面后端读取 `check_configs`。
+- 请求模板、分组、通知、站点设置等后台数据通过 `lib/admin/data.ts` 汇总。
 
-- 当前实现按单进程模式运行：活动实例会直接执行轮询与写入，不再依赖数据库租约选主。
-- Dashboard/API 数据路径会显式确保轮询器被拉起，并在检测到空窗时补跑一轮。
-- 若未来要恢复多节点部署，需要重新引入明确的去重/选主机制，而不是复用旧租约链路。
+### 4.2 健康检查执行
 
-## 8. 关键约束
+- `lib/providers/ai-sdk-check.ts` 统一发起 Provider 检查。
+- `lib/providers/challenge.ts` 负责挑战题验证，目前包含 yes/no 与算术类验证逻辑。
+- `lib/providers/endpoint-utils.ts` / `endpoint-ping.ts` 负责端点层与网络层辅助逻辑。
 
-- `enabled = false` 的配置不会被轮询器读取。
-- `is_maintenance = true` 会保留卡片并返回 `maintenance` 状态，但不执行实际检查。
-- 若 RPC/视图未安装，聚合层会回退到简单查询，性能下降，应优先补齐迁移。
+### 4.3 历史与统计
+
+- `lib/database/history.ts` 在后端具备 `historySnapshots` 能力时才会写入历史。
+- `lib/database/availability.ts` 只在具备 `availabilityStats` 能力的后端上读取统计视图。
+- 非 Supabase 后端下，这些路径会按能力矩阵主动退化，而不是假装可用。
+
+### 4.4 前端聚合与缓存
+
+- `lib/core/health-snapshot-service.ts` 负责统一刷新与快照读取。
+- `lib/core/dashboard-data.ts` / `lib/core/group-data.ts` 生成 Dashboard 与 Group 页面所需聚合结构。
+- `lib/core/frontend-cache.ts` / `group-frontend-cache.ts` 在客户端侧做 SWR 风格缓存。
+
+## 5. 模块边界
+
+- `app/`：页面、API 路由与后台入口
+- `components/`：Dashboard、分组、后台 UI 组件
+- `lib/core/`：轮询、聚合、缓存与运行参数解析
+- `lib/providers/`：各 Provider 检查能力与请求验证
+- `lib/storage/`：后端解析、能力矩阵、控制面持久化实现
+- `lib/database/`：在能力允许时读取历史、统计与聚合数据
+- `lib/admin/`：后台认证、写操作、诊断与反馈视图
+- `lib/supabase/`：Supabase 客户端与运行时迁移逻辑
+
+## 6. 单进程轮询模型
+
+- 当前实现默认按**单进程**模式运行：同一个应用实例直接启动轮询器。
+- Dashboard / API 路径会确保轮询器被拉起，并在必要时补跑刷新。
+- 上游版本中的数据库租约选主已不再是当前默认路径；如果未来要恢复多节点部署，需要重新设计明确的去重/选主机制。
+
+## 7. 关键约束
+
+- `enabled = false` 的配置不会被轮询。
+- `is_maintenance = true` 会保留卡片，但不执行真实检查。
+- 非 Supabase 后端下，不应假设历史、可用性视图和运行时迁移能力存在。
+- 容器镜像若需要支持 Supabase 运行时迁移，必须把 `supabase/migrations/` 一起打包到镜像中。
 

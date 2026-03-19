@@ -60,18 +60,18 @@ cp .env.example .env.local
 
 ```env
 DATABASE_PROVIDER=
-SUPABASE_URL=...
-SUPABASE_PUBLISHABLE_OR_ANON_KEY=...
-SUPABASE_SERVICE_ROLE_KEY=...
+SUPABASE_URL=
+SUPABASE_PUBLISHABLE_OR_ANON_KEY=
+SUPABASE_SERVICE_ROLE_KEY=
 DATABASE_URL=
 POSTGRES_URL=
+POSTGRES_PRISMA_URL=
 SQLITE_DATABASE_PATH=.sisyphus/local-data/app.db
 ADMIN_SESSION_SECRET=...
 NEXT_PUBLIC_TURNSTILE_SITE_KEY=
 TURNSTILE_SECRET_KEY=
 SUPABASE_DB_SCHEMA=public
 SUPABASE_DB_URL=
-CHECK_NODE_ID=local
 CHECK_POLL_INTERVAL_SECONDS=60
 HISTORY_RETENTION_DAYS=30
 OFFICIAL_STATUS_CHECK_INTERVAL_SECONDS=300
@@ -80,9 +80,11 @@ CHECK_CONCURRENCY=5
 
 ### 4. 初始化数据库
 
-- 使用 Supabase：执行 `supabase/schema.sql`（如需开发 schema，请执行 `supabase/schema-dev.sql`）；已存在数据库则按顺序执行 `supabase/migrations/`。
-- 使用本地 / 自建 Postgres：控制面（管理员、站点设置、配置、模板、分组、通知）所需表会由应用在首次访问时自动创建；如要继续启用历史、租约和视图能力，仍建议同步执行 `supabase/schema.sql` 中对应结构。
-- 使用 SQLite：控制面所需表会在首次访问时自动创建到 `SQLITE_DATABASE_PATH`（默认 `.sisyphus/local-data/app.db`）。
+- 使用 **Supabase**：新库请先执行 `supabase/schema.sql`，再按顺序执行 `supabase/migrations/`（至少包含当前仓库新增的 `admin_users`、`site_settings` 等迁移）。如果你希望在后台管理页检查或补齐部分运行时对象，也可以使用 `/admin/storage` 中的诊断与自动修复入口。
+- 使用 **本地 / 自建 Postgres**：控制面所需表（管理员、站点设置、检测配置、请求模板、分组、通知）会在首次访问时自动创建，无需先跑 Supabase schema。
+- 使用 **SQLite**：控制面所需表会在首次访问时自动创建到 `SQLITE_DATABASE_PATH`（默认 `.sisyphus/local-data/app.db`）。
+
+> 注意：只有 **Supabase** 后端提供历史快照、可用性统计视图，以及 Supabase 专属的运行时迁移诊断 / 自动修复能力；SQLite / 直连 Postgres 目前主要承载控制面读写。
 
 ### 5. 添加最小配置
 
@@ -131,7 +133,7 @@ docker compose logs -f check-cx
 docker compose down
 ```
 
-如果你使用 Supabase 或外部 Postgres，只需要在 `.env` 中填入对应连接信息；如果完全不配远端后端，Compose 会按当前实现自动回退到容器内持久化的 SQLite。
+如果你使用 Supabase 或外部 Postgres，只需要在 `.env` 中填入对应连接信息；如果远端后端变量保持为空，Compose 会按当前实现自动回退到容器内持久化的 SQLite。
 
 ## 配置说明
 
@@ -142,14 +144,15 @@ docker compose down
 | `DATABASE_PROVIDER`                      | 否  | 自动解析 | 显式指定 `supabase` / `postgres` / `sqlite`，否则按解析规则自动选择 |
 | `SUPABASE_URL`                           | 否  | -       | Supabase 项目 URL；与 `SUPABASE_SERVICE_ROLE_KEY` 一起构成 Supabase 存储后端 |
 | `SUPABASE_PUBLISHABLE_OR_ANON_KEY`       | 否  | -       | Supabase 公共访问 Key；公开链路 / SSR 客户端使用 |
-| `SUPABASE_SERVICE_ROLE_KEY`              | 否  | -       | Service Role Key（服务端使用，勿暴露）；也是默认 session secret 回退值 |
+| `SUPABASE_SERVICE_ROLE_KEY`              | 否  | -       | Service Role Key（服务端使用，勿暴露）；仅在 Supabase 模式下也是 `ADMIN_SESSION_SECRET` 的回退值 |
 | `DATABASE_URL`                           | 否  | -       | 直连 Postgres 连接串；自动解析时优先于 `POSTGRES_URL` |
 | `POSTGRES_URL`                           | 否  | -       | 直连 Postgres 连接串备用变量 |
+| `POSTGRES_PRISMA_URL`                    | 否  | -       | 兼容 Prisma / 平台注入的 Postgres 连接串，也会参与自动解析 |
 | `SUPABASE_DB_URL`                        | 否  | -       | Supabase 直连 Postgres 连接串；仍可用于运行时 migration |
 | `SQLITE_DATABASE_PATH`                   | 否  | `.sisyphus/local-data/app.db` | SQLite 文件路径，建议保留在项目目录的 server-only 路径 |
-| `ADMIN_SESSION_SECRET`                   | 否  | `SUPABASE_SERVICE_ROLE_KEY` | 后台登录 session 签名密钥；非 Supabase 环境建议显式配置 |
-| `NEXT_PUBLIC_TURNSTILE_SITE_KEY`         | 否  | -       | Cloudflare Turnstile 站点 Key，填写后登录页展示挑战 |
-| `TURNSTILE_SECRET_KEY`                   | 否  | -       | Cloudflare Turnstile 服务端 Secret，需与站点 Key 同时配置 |
+| `ADMIN_SESSION_SECRET`                   | 否  | `SUPABASE_SERVICE_ROLE_KEY`（若已提供） | 后台登录 session 签名密钥；SQLite / Postgres 环境请显式填写 |
+| `NEXT_PUBLIC_TURNSTILE_SITE_KEY`         | 否  | -       | Cloudflare Turnstile 站点 Key；需与 `TURNSTILE_SECRET_KEY` 同时配置才会启用 |
+| `TURNSTILE_SECRET_KEY`                   | 否  | -       | Cloudflare Turnstile 服务端 Secret；需与站点 Key 成对出现 |
 | `SUPABASE_DB_SCHEMA`                     | 否  | `public` | Supabase schema 名称；只有本地显式使用 dev schema 时才改为 `dev` |
 | `CHECK_POLL_INTERVAL_SECONDS`            | 否  | `60`    | 检测间隔（15–600 秒）              |
 | `CHECK_CONCURRENCY`                      | 否  | `5`     | 最大并发（1–20）                  |
@@ -165,7 +168,7 @@ docker compose down
 3. 否则若 `DATABASE_URL` / `POSTGRES_URL` / `POSTGRES_PRISMA_URL` / `SUPABASE_DB_URL` 任一完整，则使用 Postgres
 4. 否则回退到 SQLite，默认写入 `.sisyphus/local-data/app.db`
 
-目前 SQLite / 直连 Postgres 优先覆盖控制面路径：管理员认证、站点设置、检测配置、请求模板、分组信息和系统通知。历史快照与可用性视图仍可继续工作，后续功能应通过能力判断而不是写死 Supabase 假设。
+目前 SQLite / 直连 Postgres 优先覆盖控制面路径：管理员认证、站点设置、检测配置、请求模板、分组信息和系统通知。历史快照、可用性统计与 Supabase 专属诊断能力仅在 Supabase 后端中可用；新增功能时应通过能力判断而不是写死 Supabase 假设。
 
 ### Provider 配置要点
 
