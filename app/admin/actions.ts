@@ -11,6 +11,8 @@ import {
   requireAdminSession,
   verifyTurnstile,
 } from "@/lib/admin/auth";
+import {importControlPlaneToTarget} from "@/lib/admin/managed-storage-import";
+import {runPostgresConnectionDiagnostics} from "@/lib/admin/postgres-connection-diagnostics";
 import {runSupabaseAutoFix} from "@/lib/admin/supabase-diagnostics";
 import {ADMIN_NOTIFICATION_LEVELS, ADMIN_PROVIDER_TYPES} from "@/lib/admin/data";
 import {invalidateStorageDiagnosticsCache} from "@/lib/admin/storage-diagnostics-cache";
@@ -18,13 +20,21 @@ import {invalidateDashboardCache} from "@/lib/core/dashboard-data";
 import {invalidateConfigCache} from "@/lib/database/config-loader";
 import {invalidateGroupInfoCache} from "@/lib/database/group-info";
 import {invalidateSiteSettingsCache} from "@/lib/site-settings";
-import {getControlPlaneStorage} from "@/lib/storage/resolver";
+import {
+  activateManagedStorageDraft,
+  recordManagedPostgresTestReport,
+  recordManagedStorageImportResult,
+  updateManagedStorageDraft,
+} from "@/lib/storage/bootstrap-store";
+import {getControlPlaneStorage, resetStorageResolverCaches} from "@/lib/storage/resolver";
 import {ensureRuntimeMigrations, invalidateRuntimeMigrationCache} from "@/lib/supabase/runtime-migrations";
 import {normalizeProviderEndpoint} from "@/lib/providers/endpoint-utils";
 import {getErrorMessage, logError} from "@/lib/utils";
 import {SITE_SETTINGS_SINGLETON_KEY} from "@/lib/types/site-settings";
 
 type JsonRecord = Record<string, unknown>;
+type ManagedStorageProvider = "supabase" | "postgres";
+type ManagedStorageBackupProvider = ManagedStorageProvider | "none";
 
 function getText(formData: FormData, key: string): string {
   const value = formData.get(key);
@@ -75,6 +85,41 @@ function ensureNotificationLevel(
   ) {
     throw new Error("不支持的通知级别");
   }
+}
+
+function ensureManagedStorageProvider(value: string): asserts value is ManagedStorageProvider {
+  if (value !== "supabase" && value !== "postgres") {
+    throw new Error("主后端仅支持 Supabase 或 PostgreSQL");
+  }
+}
+
+function ensureManagedStorageBackupProvider(
+  value: string
+): asserts value is ManagedStorageBackupProvider {
+  if (value !== "supabase" && value !== "postgres" && value !== "none") {
+    throw new Error("备用后端仅支持 Supabase、PostgreSQL 或 none");
+  }
+}
+
+function readManagedStorageDraft(formData: FormData): {
+  postgresConnectionString: string;
+  draftPrimaryProvider: ManagedStorageProvider;
+  draftBackupProvider: ManagedStorageBackupProvider;
+} {
+  const draftPrimaryProvider = getText(formData, "draft_primary_provider");
+  const draftBackupProvider = getText(formData, "draft_backup_provider");
+  ensureManagedStorageProvider(draftPrimaryProvider);
+  ensureManagedStorageBackupProvider(draftBackupProvider);
+
+  if (draftPrimaryProvider === draftBackupProvider) {
+    throw new Error("主后端和备用后端不能相同");
+  }
+
+  return {
+    postgresConnectionString: getText(formData, "postgres_connection_string"),
+    draftPrimaryProvider,
+    draftBackupProvider,
+  };
 }
 
 function buildRedirectUrl(
@@ -238,6 +283,86 @@ export async function runSupabaseAutoFixAction(): Promise<never> {
     const message = error instanceof Error ? error.message : getErrorMessage(error);
     redirect(buildRedirectUrl("/admin/storage", "error", message));
   }
+}
+
+export async function saveManagedStorageDraftAction(formData: FormData): Promise<never> {
+  return handleAction(formData, "saveManagedStorageDraft", "后端草稿配置已保存", async () => {
+    updateManagedStorageDraft(readManagedStorageDraft(formData));
+  });
+}
+
+export async function testManagedPostgresAction(formData: FormData): Promise<never> {
+  return handleAction(formData, "testManagedPostgres", "PostgreSQL 连接测试完成", async () => {
+    const draft = updateManagedStorageDraft(readManagedStorageDraft(formData));
+    const connectionString = draft.postgresConnectionString;
+    if (!connectionString) {
+      throw new Error("请先填写 PostgreSQL 连接串");
+    }
+
+    const report = await runPostgresConnectionDiagnostics(connectionString);
+    recordManagedPostgresTestReport(report);
+
+    if (!report.ok) {
+      throw new Error("PostgreSQL 连接测试未通过，请先修复失败项后再导入或启用");
+    }
+  });
+}
+
+export async function importManagedPostgresAction(formData: FormData): Promise<never> {
+  return handleAction(formData, "importManagedPostgres", "控制面数据已导入目标主后端", async () => {
+    const draft = updateManagedStorageDraft(readManagedStorageDraft(formData));
+    const targetProvider =
+      draft.draftPrimaryProvider === "postgres" || draft.draftBackupProvider === "postgres"
+        ? "postgres"
+        : "supabase";
+
+    if (targetProvider === "postgres" && !draft.postgresConnectionString) {
+      throw new Error("缺少 PostgreSQL 连接串，无法导入");
+    }
+    if (targetProvider === "postgres" && !draft.postgresLastTestOk) {
+      throw new Error("请先完成并通过 PostgreSQL 连接测试");
+    }
+
+    const sourceStorage = await getControlPlaneStorage();
+    const summary = await importControlPlaneToTarget({
+      sourceStorage,
+      targetProvider,
+      postgresConnectionString: draft.postgresConnectionString,
+    });
+    recordManagedStorageImportResult({ok: true, summary});
+  });
+}
+
+export async function activateManagedStorageAction(formData: FormData): Promise<never> {
+  return handleAction(formData, "activateManagedStorage", "托管存储配置已启用", async () => {
+    const draft = updateManagedStorageDraft(readManagedStorageDraft(formData));
+
+    const usesSupabase =
+      draft.draftPrimaryProvider === "supabase" || draft.draftBackupProvider === "supabase";
+    if (
+      usesSupabase &&
+      (!process.env.SUPABASE_URL?.trim() || !process.env.SUPABASE_SERVICE_ROLE_KEY?.trim())
+    ) {
+      throw new Error("当前没有可用的 Supabase 环境变量，无法把 Supabase 设为主后端或备用后端");
+    }
+
+    const usesPostgres =
+      draft.draftPrimaryProvider === "postgres" || draft.draftBackupProvider === "postgres";
+    if (usesPostgres) {
+      if (!draft.postgresConnectionString) {
+        throw new Error("请先填写 PostgreSQL 连接串");
+      }
+      if (!draft.postgresLastTestOk) {
+        throw new Error("请先完成并通过 PostgreSQL 连接测试");
+      }
+      if (!draft.lastImportOk) {
+        throw new Error("请先把当前控制面数据导入 PostgreSQL，再执行启用");
+      }
+    }
+
+    activateManagedStorageDraft();
+    await resetStorageResolverCaches();
+  });
 }
 
 export async function runSupabaseAutoMigrateAction(): Promise<never> {
