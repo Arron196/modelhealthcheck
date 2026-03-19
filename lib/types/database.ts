@@ -48,6 +48,14 @@ export interface CheckHistoryRow {
   message: string | null;
 }
 
+export interface HistorySnapshotRow extends CheckHistoryRow {
+  name: string;
+  type: string;
+  model: string;
+  endpoint: string | null;
+  group_name: string | null;
+}
+
 /**
  * availability_stats 视图的行类型
  */

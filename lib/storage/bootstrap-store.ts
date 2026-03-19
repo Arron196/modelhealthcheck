@@ -28,6 +28,7 @@ export interface ManagedStorageImportSummary {
   counts: {
     adminUsers: number;
     checkConfigs: number;
+    historyRows: number;
     requestTemplates: number;
     groups: number;
     notifications: number;

@@ -25,7 +25,7 @@ export function ManagedStoragePanel() {
   return (
     <AdminPanel
       title="托管后端切换"
-      description="在这里维护 PostgreSQL 连接、主备角色和受控切换流程。v1 流程固定为：保存草稿 → 测试连接 → 导入控制面 → 启用。"
+      description="在这里维护 PostgreSQL 连接、主备角色和受控切换流程。当前流程固定为：保存草稿 → 测试连接 → 导入当前数据（含历史记录）→ 启用。"
     >
       <div className="space-y-6">
         <div className="grid gap-4 md:grid-cols-3">
@@ -45,7 +45,7 @@ export function ManagedStoragePanel() {
             helper={
               settings.lastImportSummary
                 ? `${settings.lastImportSummary.targetProvider} @ ${settings.lastImportSummary.importedAt}`
-                : "尚未导入控制面数据"
+                : "尚未导入当前数据（含历史记录）"
             }
           />
           <AdminStatCard
@@ -185,7 +185,7 @@ export function ManagedStoragePanel() {
               测试 PostgreSQL 连接
             </Button>
             <Button type="submit" formAction={importManagedStorageAction} variant="outline" className="rounded-full">
-              导入当前控制面到目标后端
+              导入当前数据到目标后端
             </Button>
             <Button type="submit" formAction={activateManagedStorageAction} className="rounded-full">
               启用主备拓扑
@@ -217,9 +217,10 @@ export function ManagedStoragePanel() {
         {settings.lastImportSummary ? (
           <div className="rounded-[1.5rem] border border-border/40 bg-background/60 p-4 shadow-sm">
             <div className="text-sm font-medium text-foreground">最近一次导入摘要</div>
-            <div className="mt-3 grid gap-4 md:grid-cols-3 xl:grid-cols-6">
+            <div className="mt-3 grid gap-4 md:grid-cols-3 xl:grid-cols-7">
               <AdminStatCard label="Admin Users" value={settings.lastImportSummary.counts.adminUsers} helper="保留 id / hash" />
               <AdminStatCard label="Configs" value={settings.lastImportSummary.counts.checkConfigs} helper="Provider 配置" />
+              <AdminStatCard label="History" value={settings.lastImportSummary.counts.historyRows ?? 0} helper="检测历史记录" />
               <AdminStatCard label="Templates" value={settings.lastImportSummary.counts.requestTemplates} helper="请求模板" />
               <AdminStatCard label="Groups" value={settings.lastImportSummary.counts.groups} helper="分组信息" />
               <AdminStatCard label="Notifications" value={settings.lastImportSummary.counts.notifications} helper="系统通知" />

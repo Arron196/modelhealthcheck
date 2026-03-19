@@ -5,6 +5,7 @@ import {createHash} from "node:crypto";
 import {createSupabaseControlPlaneStorage} from "@/lib/storage/supabase";
 import type {ControlPlaneStorage, StoredCheckConfigRow} from "@/lib/storage/types";
 import {createPostgresControlPlaneStorage} from "@/lib/storage/postgres";
+import type {HistorySnapshotRow} from "@/lib/types/database";
 import {SITE_SETTINGS_SINGLETON_KEY} from "@/lib/types/site-settings";
 
 import type {
@@ -17,6 +18,7 @@ interface ControlPlaneSnapshot {
   adminUsers: Awaited<ReturnType<ControlPlaneStorage["adminUsers"]["list"]>>;
   siteSettings: Awaited<ReturnType<ControlPlaneStorage["siteSettings"]["getSingleton"]>>;
   checkConfigs: StoredCheckConfigRow[];
+  historyRows: HistorySnapshotRow[];
   requestTemplates: Awaited<ReturnType<ControlPlaneStorage["requestTemplates"]["list"]>>;
   groups: Awaited<ReturnType<ControlPlaneStorage["groups"]["list"]>>;
   notifications: Awaited<ReturnType<ControlPlaneStorage["notifications"]["list"]>>;
@@ -31,20 +33,28 @@ interface ManagedImportVerificationResult {
 
 async function collectSnapshot(storage: ControlPlaneStorage): Promise<ControlPlaneSnapshot> {
   await storage.ensureReady();
-  const [adminUsers, siteSettings, checkConfigs, requestTemplates, groups, notifications] =
-    await Promise.all([
-      storage.adminUsers.list(),
-      storage.siteSettings.getSingleton(SITE_SETTINGS_SINGLETON_KEY),
-      storage.checkConfigs.list(),
-      storage.requestTemplates.list(),
-      storage.groups.list(),
-      storage.notifications.list(),
-    ]);
+  const [adminUsers, siteSettings, checkConfigs, requestTemplates, groups, notifications] = await Promise.all([
+    storage.adminUsers.list(),
+    storage.siteSettings.getSingleton(SITE_SETTINGS_SINGLETON_KEY),
+    storage.checkConfigs.list(),
+    storage.requestTemplates.list(),
+    storage.groups.list(),
+    storage.notifications.list(),
+  ]);
+  const configIds = checkConfigs.map((row) => row.id);
+  const historyRows =
+    configIds.length > 0
+      ? await storage.runtime.history.fetchRows({
+          allowedIds: configIds,
+          limitPerConfig: null,
+        })
+      : [];
 
   return {
     adminUsers,
     siteSettings,
     checkConfigs,
+    historyRows,
     requestTemplates,
     groups,
     notifications,
@@ -89,6 +99,19 @@ function stableSortKeys(value: unknown): unknown {
   return value;
 }
 
+function sortHistoryRows(rows: HistorySnapshotRow[]): HistorySnapshotRow[] {
+  return [...rows].sort((left, right) => {
+    return (
+      left.config_id.localeCompare(right.config_id, "en") ||
+      left.checked_at.localeCompare(right.checked_at, "en") ||
+      left.status.localeCompare(right.status, "en") ||
+      (left.latency_ms ?? -1) - (right.latency_ms ?? -1) ||
+      (left.ping_latency_ms ?? -1) - (right.ping_latency_ms ?? -1) ||
+      (left.message ?? "").localeCompare(right.message ?? "", "en")
+    );
+  });
+}
+
 function createSnapshotFingerprint(snapshot: ControlPlaneSnapshot): string {
   const payload = stableSortKeys({
     adminUsers: sortById(snapshot.adminUsers).map((row) => ({
@@ -124,6 +147,14 @@ function createSnapshotFingerprint(snapshot: ControlPlaneSnapshot): string {
       request_header: row.request_header ?? null,
       metadata: row.metadata ?? null,
       group_name: row.group_name ?? null,
+    })),
+    historyRows: sortHistoryRows(snapshot.historyRows).map((row) => ({
+      config_id: row.config_id,
+      status: row.status,
+      latency_ms: row.latency_ms,
+      ping_latency_ms: row.ping_latency_ms,
+      checked_at: row.checked_at,
+      message: row.message ?? null,
     })),
     requestTemplates: sortById(snapshot.requestTemplates).map((row) => ({
       id: row.id,
@@ -237,6 +268,11 @@ export async function importControlPlaneToTarget(input: {
     remove: (id) => targetStorage.checkConfigs.delete(id),
   });
 
+  await targetStorage.runtime.history.replaceForConfigs({
+    configIds: sourceSnapshot.checkConfigs.map((row) => row.id),
+    rows: sourceSnapshot.historyRows,
+  });
+
   const verifiedTargetSnapshot = await collectSnapshot(targetStorage);
   const targetFingerprint = createSnapshotFingerprint(verifiedTargetSnapshot);
   if (targetFingerprint !== sourceFingerprint) {
@@ -252,6 +288,7 @@ export async function importControlPlaneToTarget(input: {
     counts: {
       adminUsers: sourceSnapshot.adminUsers.length,
       checkConfigs: sourceSnapshot.checkConfigs.length,
+      historyRows: sourceSnapshot.historyRows.length,
       requestTemplates: sourceSnapshot.requestTemplates.length,
       groups: sourceSnapshot.groups.length,
       notifications: sourceSnapshot.notifications.length,

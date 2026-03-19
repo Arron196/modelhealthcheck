@@ -12,14 +12,17 @@ import {
   getDefaultRequestTemplateRows,
   getDefaultSiteSettingsRow,
   mapAdminUserRecord,
+  mapAvailabilityStatsRow,
   mapCheckConfigRow,
   mapGroupInfoRow,
+  mapHistorySnapshotRow,
   mapNotificationRow,
   mapRequestTemplateRow,
   mapSiteSettingsRow,
   nowIso,
   serializeJson,
   SQLITE_CONTROL_PLANE_SCHEMA_STATEMENTS,
+  SQLITE_RUNTIME_SCHEMA_STATEMENTS,
 } from "./shared";
 import type {
   CheckConfigMutationInput,
@@ -27,6 +30,7 @@ import type {
   GroupMutationInput,
   NotificationMutationInput,
   RequestTemplateMutationInput,
+  RuntimeHistoryQueryOptions,
   SiteSettingsMutationInput,
   StorageCapabilities,
 } from "./types";
@@ -39,8 +43,8 @@ const capabilities: StorageCapabilities = {
   requestTemplates: true,
   groups: true,
   notifications: true,
-  historySnapshots: false,
-  availabilityStats: false,
+  historySnapshots: true,
+  availabilityStats: true,
   pollerLease: false,
   runtimeMigrations: false,
   supabaseDiagnostics: false,
@@ -96,6 +100,10 @@ export function createSqliteControlPlaneStorage(filePath: string): ControlPlaneS
     readyPromise = Promise.resolve()
       .then(() => {
         for (const statement of SQLITE_CONTROL_PLANE_SCHEMA_STATEMENTS) {
+          db.prepare(statement).run();
+        }
+
+        for (const statement of SQLITE_RUNTIME_SCHEMA_STATEMENTS) {
           db.prepare(statement).run();
         }
 
@@ -170,10 +178,260 @@ export function createSqliteControlPlaneStorage(filePath: string): ControlPlaneS
     return readyPromise;
   }
 
+  function normalizeIds(ids?: Iterable<string> | null): string[] | null {
+    if (!ids) {
+      return null;
+    }
+
+    const normalized = Array.from(ids).filter(Boolean);
+    return normalized.length > 0 ? normalized : [];
+  }
+
+  function chunkRows<T>(rows: T[], size: number): T[][] {
+    const chunks: T[][] = [];
+    for (let index = 0; index < rows.length; index += size) {
+      chunks.push(rows.slice(index, index + size));
+    }
+    return chunks;
+  }
+
+  async function fetchHistoryRows(options?: RuntimeHistoryQueryOptions) {
+    await ensureReady();
+
+    const normalizedIds = normalizeIds(options?.allowedIds);
+    if (Array.isArray(normalizedIds) && normalizedIds.length === 0) {
+      return [];
+    }
+
+    const limitPerConfig = options?.limitPerConfig ?? 60;
+    const filterClause = normalizedIds
+      ? `WHERE h.config_id IN (${normalizedIds.map(() => "?").join(", ")})`
+      : "";
+    const limitClause = typeof limitPerConfig === "number" ? `WHERE row_number <= ?` : "";
+
+    try {
+      const params: Array<string | number> = [...(normalizedIds ?? [])];
+      if (typeof limitPerConfig === "number") {
+        params.push(limitPerConfig);
+      }
+
+      const rows = db.prepare(
+        `
+          WITH ranked_history AS (
+            SELECT
+              CAST(h.id AS text) AS id,
+              h.config_id,
+              h.status,
+              h.latency_ms,
+              h.ping_latency_ms,
+              h.checked_at,
+              h.message,
+              c.name,
+              c.type,
+              c.model,
+              c.endpoint,
+              c.group_name,
+              ROW_NUMBER() OVER (PARTITION BY h.config_id ORDER BY h.checked_at DESC) AS row_number
+            FROM check_history h
+            INNER JOIN check_configs c ON c.id = h.config_id
+            ${filterClause}
+          )
+          SELECT id, config_id, status, latency_ms, ping_latency_ms, checked_at, message, name, type, model, endpoint, group_name
+          FROM ranked_history
+          ${limitClause}
+          ORDER BY checked_at DESC
+        `
+      ).all(...params) as Array<Record<string, unknown>>;
+
+      return rows.map(mapHistorySnapshotRow);
+    } catch (error) {
+      wrapError("读取历史快照", error);
+    }
+  }
+
+  async function appendHistory(results: Array<{
+    id: string;
+    status: string;
+    latencyMs: number | null;
+    pingLatencyMs: number | null;
+    checkedAt: string;
+    message: string;
+  }>) {
+    await ensureReady();
+    if (results.length === 0) {
+      return;
+    }
+
+    const statement = db.prepare(
+      `
+        INSERT INTO check_history (
+          config_id,
+          status,
+          latency_ms,
+          ping_latency_ms,
+          checked_at,
+          message,
+          created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `
+    );
+
+    const insertMany = db.transaction(
+      (entries: typeof results) => {
+        for (const result of entries) {
+          statement.run(
+            result.id,
+            result.status,
+            result.latencyMs,
+            result.pingLatencyMs,
+            result.checkedAt,
+            result.message,
+            result.checkedAt
+          );
+        }
+      }
+    );
+
+    try {
+      insertMany(results);
+    } catch (error) {
+      wrapError("写入历史记录", error);
+    }
+  }
+
+  async function pruneHistory(retentionDays: number) {
+    await ensureReady();
+    const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000).toISOString();
+
+    try {
+      db.prepare(`DELETE FROM check_history WHERE checked_at < ?`).run(cutoff);
+    } catch (error) {
+      wrapError("清理历史记录", error);
+    }
+  }
+
+  async function replaceHistoryForConfigs(input: {
+    configIds: Iterable<string>;
+    rows: Awaited<ReturnType<typeof fetchHistoryRows>>;
+  }) {
+    await ensureReady();
+
+    const normalizedIds = normalizeIds(input.configIds);
+    if (!normalizedIds || normalizedIds.length === 0) {
+      return;
+    }
+
+    const deleteStatement = db.prepare(
+      `DELETE FROM check_history WHERE config_id IN (${normalizedIds.map(() => "?").join(", ")})`
+    );
+    const insertStatement = db.prepare(
+      `
+        INSERT INTO check_history (
+          config_id,
+          status,
+          latency_ms,
+          ping_latency_ms,
+          checked_at,
+          message,
+          created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `
+    );
+
+    const replaceMany = db.transaction((rows: typeof input.rows) => {
+      deleteStatement.run(...normalizedIds);
+      for (const batch of chunkRows(rows, 500)) {
+        for (const row of batch) {
+          insertStatement.run(
+            row.config_id,
+            row.status,
+            row.latency_ms,
+            row.ping_latency_ms,
+            row.checked_at,
+            row.message,
+            row.checked_at
+          );
+        }
+      }
+    });
+
+    try {
+      replaceMany(input.rows);
+    } catch (error) {
+      wrapError("替换历史记录", error);
+    }
+  }
+
+  async function listAvailabilityStats(configIds?: Iterable<string> | null) {
+    await ensureReady();
+
+    const normalizedIds = normalizeIds(configIds);
+    if (Array.isArray(normalizedIds) && normalizedIds.length === 0) {
+      return [];
+    }
+
+    const cutoff7d = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const cutoff15d = new Date(Date.now() - 15 * 24 * 60 * 60 * 1000).toISOString();
+    const cutoff30d = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+
+    const buildSelect = (period: "7d" | "15d" | "30d") => `
+      SELECT
+        config_id,
+        '${period}' AS period,
+        COUNT(*) AS total_checks,
+        SUM(CASE WHEN status = 'operational' THEN 1 ELSE 0 END) AS operational_count,
+        ROUND(100.0 * SUM(CASE WHEN status = 'operational' THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 2) AS availability_pct
+      FROM check_history
+      WHERE checked_at > ?
+      ${normalizedIds ? `AND config_id IN (${normalizedIds.map(() => "?").join(", ")})` : ""}
+      GROUP BY config_id
+    `;
+
+    try {
+      const statement = db.prepare(
+        `
+          ${buildSelect("7d")}
+          UNION ALL
+          ${buildSelect("15d")}
+          UNION ALL
+          ${buildSelect("30d")}
+          ORDER BY config_id ASC, period ASC
+        `
+      );
+      const params = normalizedIds
+        ? [
+            cutoff7d,
+            ...normalizedIds,
+            cutoff15d,
+            ...normalizedIds,
+            cutoff30d,
+            ...normalizedIds,
+          ]
+        : [cutoff7d, cutoff15d, cutoff30d];
+      const rows = statement.all(...params) as Array<Record<string, unknown>>;
+      return rows.map(mapAvailabilityStatsRow);
+    } catch (error) {
+      wrapError("读取可用性统计", error);
+    }
+  }
+
   return {
     provider: "sqlite",
     capabilities,
     ensureReady,
+    runtime: {
+      history: {
+        fetchRows: fetchHistoryRows,
+        append: appendHistory,
+        prune: pruneHistory,
+        replaceForConfigs: replaceHistoryForConfigs,
+      },
+      availability: {
+        listStats: listAvailabilityStats,
+      },
+    },
     adminUsers: {
       async hasAny() {
         await ensureReady();

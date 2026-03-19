@@ -145,7 +145,7 @@ export default async function AdminLoginPage({searchParams}: AdminLoginPageProps
               </div>
               {!adminExists ? (
                 <div className="rounded-[1.5rem] border border-border/40 bg-background/70 px-4 py-4 shadow-sm">
-                  推荐流程是：先创建管理员 → 在 `/admin/storage` 决定是否继续使用 SQLite → 若要接入 PostgreSQL / Supabase，再保存草稿、导入当前控制面数据并执行启用。
+                  推荐流程是：先创建管理员 → 在 `/admin/storage` 决定是否继续使用 SQLite → 若要接入 PostgreSQL / Supabase，再保存草稿、导入当前数据（含历史记录）并执行启用。
                 </div>
               ) : null}
               <div className="rounded-[1.5rem] border border-border/40 bg-background/70 px-4 py-4 shadow-sm">

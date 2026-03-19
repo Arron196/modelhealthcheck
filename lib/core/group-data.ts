@@ -24,6 +24,10 @@ interface GroupDashboardCacheEntry {
 const DEFAULT_GROUP_CACHE_TTL_MS = 5 * 60 * 1000;
 const groupDashboardCache = new Map<string, GroupDashboardCacheEntry>();
 
+export function invalidateGroupDashboardCache(): void {
+  groupDashboardCache.clear();
+}
+
 function getGroupCacheKey(
   groupName: string,
   pollIntervalMs: number,

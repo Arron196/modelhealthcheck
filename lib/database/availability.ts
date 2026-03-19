@@ -4,9 +4,8 @@
 
 import "server-only";
 
-import {createAdminClient} from "../supabase/admin";
 import {getPollingIntervalMs} from "../core/polling-config";
-import {getStorageCapabilities} from "@/lib/storage/resolver";
+import {getControlPlaneStorage} from "@/lib/storage/resolver";
 import type {AvailabilityStats} from "../types/database";
 import type {AvailabilityStat, AvailabilityStatsMap} from "../types";
 import {logError} from "../utils";
@@ -38,6 +37,11 @@ export function getAvailabilityCacheMetrics(): AvailabilityCacheMetrics {
 export function resetAvailabilityCacheMetrics(): void {
   metrics.hits = 0;
   metrics.misses = 0;
+}
+
+export function invalidateAvailabilityCache(): void {
+  cache.data = {};
+  cache.lastFetchedAt = 0;
 }
 
 function normalizeIds(ids?: Iterable<string> | null): string[] | null {
@@ -94,10 +98,6 @@ function mapRows(rows: AvailabilityStats[] | null): AvailabilityStatsMap {
 export async function getAvailabilityStats(
   configIds?: Iterable<string> | null
 ): Promise<AvailabilityStatsMap> {
-  if (!getStorageCapabilities().availabilityStats) {
-    return {};
-  }
-
   const normalizedIds = normalizeIds(configIds);
   if (Array.isArray(normalizedIds) && normalizedIds.length === 0) {
     return {};
@@ -111,21 +111,16 @@ export async function getAvailabilityStats(
   }
   metrics.misses += 1;
 
-  const supabase = createAdminClient();
-  const { data, error } = await supabase
-    .from("availability_stats")
-    .select("config_id, period, total_checks, operational_count, availability_pct")
-    .order("config_id", { ascending: true })
-    .order("period", { ascending: true });
+  try {
+    const storage = await getControlPlaneStorage();
+    const rows = await storage.runtime.availability.listStats();
+    const mapped = mapRows(rows as AvailabilityStats[] | null);
+    cache.data = mapped;
+    cache.lastFetchedAt = now;
 
-  if (error) {
+    return filterStats(mapped, normalizedIds);
+  } catch (error) {
     logError("读取可用性统计失败", error);
     return {};
   }
-
-  const mapped = mapRows(data as AvailabilityStats[] | null);
-  cache.data = mapped;
-  cache.lastFetchedAt = now;
-
-  return filterStats(mapped, normalizedIds);
 }

@@ -277,6 +277,26 @@ async function getRepositoryChecks(storage: ControlPlaneStorage): Promise<Storag
         detail: `已成功读取 ${rows.length} 条系统通知。`,
       };
     }),
+    timedCheck("repo-history", "历史快照仓库", async () => {
+      const rows = await storage.runtime.history.fetchRows({limitPerConfig: 1});
+      return {
+        status: "pass",
+        detail:
+          rows.length > 0
+            ? `历史快照读取正常，当前已采样到 ${rows.length} 条最近记录。`
+            : "历史快照读取正常，当前尚无检测历史。",
+      };
+    }),
+    timedCheck("repo-availability", "可用性统计仓库", async () => {
+      const rows = await storage.runtime.availability.listStats();
+      return {
+        status: "pass",
+        detail:
+          rows.length > 0
+            ? `可用性统计读取正常，当前返回 ${rows.length} 条聚合结果。`
+            : "可用性统计读取正常，当前尚无可聚合的历史样本。",
+      };
+    }),
   ]);
 }
 

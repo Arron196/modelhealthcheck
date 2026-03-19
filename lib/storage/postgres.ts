@@ -9,13 +9,16 @@ import {
   getDefaultRequestTemplateRows,
   getDefaultSiteSettingsRow,
   mapAdminUserRecord,
+  mapAvailabilityStatsRow,
   mapCheckConfigRow,
   mapGroupInfoRow,
+  mapHistorySnapshotRow,
   mapNotificationRow,
   mapRequestTemplateRow,
   mapSiteSettingsRow,
   nowIso,
   POSTGRES_CONTROL_PLANE_SCHEMA_STATEMENTS,
+  POSTGRES_RUNTIME_SCHEMA_STATEMENTS,
   serializeJson,
 } from "./shared";
 import type {
@@ -24,6 +27,7 @@ import type {
   GroupMutationInput,
   NotificationMutationInput,
   RequestTemplateMutationInput,
+  RuntimeHistoryQueryOptions,
   SiteSettingsMutationInput,
   StorageCapabilities,
 } from "./types";
@@ -36,8 +40,8 @@ const capabilities: StorageCapabilities = {
   requestTemplates: true,
   groups: true,
   notifications: true,
-  historySnapshots: false,
-  availabilityStats: false,
+  historySnapshots: true,
+  availabilityStats: true,
   pollerLease: false,
   runtimeMigrations: false,
   supabaseDiagnostics: false,
@@ -105,6 +109,10 @@ export function createPostgresControlPlaneStorage(connectionString: string): Con
 
     readyPromise = (async () => {
       for (const statement of POSTGRES_CONTROL_PLANE_SCHEMA_STATEMENTS) {
+        await pool.query(statement);
+      }
+
+      for (const statement of POSTGRES_RUNTIME_SCHEMA_STATEMENTS) {
         await pool.query(statement);
       }
 
@@ -178,10 +186,285 @@ export function createPostgresControlPlaneStorage(connectionString: string): Con
     return readyPromise;
   }
 
+  function normalizeIds(ids?: Iterable<string> | null): string[] | null {
+    if (!ids) {
+      return null;
+    }
+
+    const normalized = Array.from(ids).filter(Boolean);
+    return normalized.length > 0 ? normalized : [];
+  }
+
+  function chunkRows<T>(rows: T[], size: number): T[][] {
+    const chunks: T[][] = [];
+    for (let index = 0; index < rows.length; index += size) {
+      chunks.push(rows.slice(index, index + size));
+    }
+    return chunks;
+  }
+
+  async function fetchHistoryRows(options?: RuntimeHistoryQueryOptions) {
+    await ensureReady();
+
+    const normalizedIds = normalizeIds(options?.allowedIds);
+    if (Array.isArray(normalizedIds) && normalizedIds.length === 0) {
+      return [];
+    }
+
+    const limitPerConfig = options?.limitPerConfig ?? 60;
+    const params: Array<string[] | number> = [];
+    const filterClause = normalizedIds
+      ? (() => {
+          params.push(normalizedIds);
+          return `WHERE h.config_id::text = ANY($${params.length}::text[])`;
+        })()
+      : "";
+    const limitClause =
+      typeof limitPerConfig === "number"
+        ? (() => {
+            params.unshift(limitPerConfig);
+            return `WHERE row_number <= $1`;
+          })()
+        : "";
+
+    try {
+      const result = await pool.query(
+        `
+          WITH ranked_history AS (
+            SELECT
+              h.id::text AS id,
+              h.config_id::text AS config_id,
+              h.status,
+              h.latency_ms,
+              h.ping_latency_ms,
+              h.checked_at,
+              h.message,
+              c.name,
+              c.type::text AS type,
+              c.model,
+              c.endpoint,
+              c.group_name,
+              ROW_NUMBER() OVER (PARTITION BY h.config_id ORDER BY h.checked_at DESC) AS row_number
+            FROM check_history h
+            INNER JOIN check_configs c ON c.id = h.config_id
+            ${filterClause}
+          )
+          SELECT id, config_id, status, latency_ms, ping_latency_ms, checked_at, message, name, type, model, endpoint, group_name
+          FROM ranked_history
+          ${limitClause}
+          ORDER BY checked_at DESC
+        `,
+        params
+      );
+
+      return mapRows(result.rows).map(mapHistorySnapshotRow);
+    } catch (error) {
+      wrapError("读取历史快照", error);
+    }
+  }
+
+  async function appendHistory(results: Array<{
+    id: string;
+    status: string;
+    latencyMs: number | null;
+    pingLatencyMs: number | null;
+    checkedAt: string;
+    message: string;
+  }>) {
+    await ensureReady();
+    if (results.length === 0) {
+      return;
+    }
+
+    const placeholders: string[] = [];
+    const params: Array<string | number | null> = [];
+
+    for (const result of results) {
+      const baseIndex = params.length;
+      placeholders.push(
+        `($${baseIndex + 1}::uuid, $${baseIndex + 2}, $${baseIndex + 3}, $${baseIndex + 4}, $${baseIndex + 5}, $${baseIndex + 6}, $${baseIndex + 7})`
+      );
+      params.push(
+        result.id,
+        result.status,
+        result.latencyMs,
+        result.pingLatencyMs,
+        result.checkedAt,
+        result.message,
+        result.checkedAt
+      );
+    }
+
+    try {
+      await pool.query(
+        `
+          INSERT INTO check_history (
+            config_id,
+            status,
+            latency_ms,
+            ping_latency_ms,
+            checked_at,
+            message,
+            created_at
+          )
+          VALUES ${placeholders.join(", ")}
+        `,
+        params
+      );
+    } catch (error) {
+      wrapError("写入历史记录", error);
+    }
+  }
+
+  async function pruneHistory(retentionDays: number) {
+    await ensureReady();
+    const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000).toISOString();
+
+    try {
+      await pool.query(`DELETE FROM check_history WHERE checked_at < $1`, [cutoff]);
+    } catch (error) {
+      wrapError("清理历史记录", error);
+    }
+  }
+
+  async function replaceHistoryForConfigs(input: {
+    configIds: Iterable<string>;
+    rows: Awaited<ReturnType<typeof fetchHistoryRows>>;
+  }) {
+    await ensureReady();
+
+    const normalizedIds = normalizeIds(input.configIds);
+    if (!normalizedIds || normalizedIds.length === 0) {
+      return;
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(`DELETE FROM check_history WHERE config_id::text = ANY($1::text[])`, [normalizedIds]);
+
+      for (const batch of chunkRows(input.rows, 250)) {
+        if (batch.length === 0) {
+          continue;
+        }
+
+        const placeholders: string[] = [];
+        const params: Array<string | number | null> = [];
+        for (const row of batch) {
+          const baseIndex = params.length;
+          placeholders.push(
+            `($${baseIndex + 1}::uuid, $${baseIndex + 2}, $${baseIndex + 3}, $${baseIndex + 4}, $${baseIndex + 5}, $${baseIndex + 6}, $${baseIndex + 7})`
+          );
+          params.push(
+            row.config_id,
+            row.status,
+            row.latency_ms,
+            row.ping_latency_ms,
+            row.checked_at,
+            row.message,
+            row.checked_at
+          );
+        }
+
+        await client.query(
+          `
+            INSERT INTO check_history (
+              config_id,
+              status,
+              latency_ms,
+              ping_latency_ms,
+              checked_at,
+              message,
+              created_at
+            )
+            VALUES ${placeholders.join(", ")}
+          `,
+          params
+        );
+      }
+
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      wrapError("替换历史记录", error);
+    } finally {
+      client.release();
+    }
+  }
+
+  async function listAvailabilityStats(configIds?: Iterable<string> | null) {
+    await ensureReady();
+
+    const normalizedIds = normalizeIds(configIds);
+    if (Array.isArray(normalizedIds) && normalizedIds.length === 0) {
+      return [];
+    }
+
+    const params: Array<string[]> = [];
+    const filterClause = normalizedIds
+      ? (() => {
+          params.push(normalizedIds);
+          return `AND config_id::text = ANY($1::text[])`;
+        })()
+      : "";
+
+    try {
+      const result = await pool.query(
+        `
+          SELECT config_id::text AS config_id, '7d'::text AS period,
+                 COUNT(*)::bigint AS total_checks,
+                 COUNT(*) FILTER (WHERE status = 'operational')::bigint AS operational_count,
+                 ROUND(100.0 * COUNT(*) FILTER (WHERE status = 'operational') / NULLIF(COUNT(*), 0), 2) AS availability_pct
+          FROM check_history
+          WHERE checked_at > NOW() - INTERVAL '7 days' ${filterClause}
+          GROUP BY config_id
+
+          UNION ALL
+
+          SELECT config_id::text AS config_id, '15d'::text AS period,
+                 COUNT(*)::bigint AS total_checks,
+                 COUNT(*) FILTER (WHERE status = 'operational')::bigint AS operational_count,
+                 ROUND(100.0 * COUNT(*) FILTER (WHERE status = 'operational') / NULLIF(COUNT(*), 0), 2) AS availability_pct
+          FROM check_history
+          WHERE checked_at > NOW() - INTERVAL '15 days' ${filterClause}
+          GROUP BY config_id
+
+          UNION ALL
+
+          SELECT config_id::text AS config_id, '30d'::text AS period,
+                 COUNT(*)::bigint AS total_checks,
+                 COUNT(*) FILTER (WHERE status = 'operational')::bigint AS operational_count,
+                 ROUND(100.0 * COUNT(*) FILTER (WHERE status = 'operational') / NULLIF(COUNT(*), 0), 2) AS availability_pct
+          FROM check_history
+          WHERE checked_at > NOW() - INTERVAL '30 days' ${filterClause}
+          GROUP BY config_id
+
+          ORDER BY config_id ASC, period ASC
+        `,
+        params
+      );
+
+      return mapRows(result.rows).map(mapAvailabilityStatsRow);
+    } catch (error) {
+      wrapError("读取可用性统计", error);
+    }
+  }
+
   return {
     provider: "postgres",
     capabilities,
     ensureReady,
+    runtime: {
+      history: {
+        fetchRows: fetchHistoryRows,
+        append: appendHistory,
+        prune: pruneHistory,
+        replaceForConfigs: replaceHistoryForConfigs,
+      },
+      availability: {
+        listStats: listAvailabilityStats,
+      },
+    },
     adminUsers: {
       async hasAny() {
         await ensureReady();

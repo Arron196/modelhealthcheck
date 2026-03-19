@@ -17,6 +17,9 @@ import {runSupabaseAutoFix} from "@/lib/admin/supabase-diagnostics";
 import {ADMIN_NOTIFICATION_LEVELS, ADMIN_PROVIDER_TYPES} from "@/lib/admin/data";
 import {invalidateStorageDiagnosticsCache} from "@/lib/admin/storage-diagnostics-cache";
 import {invalidateDashboardCache} from "@/lib/core/dashboard-data";
+import {clearPingCache} from "@/lib/core/global-state";
+import {invalidateGroupDashboardCache} from "@/lib/core/group-data";
+import {invalidateAvailabilityCache} from "@/lib/database/availability";
 import {invalidateConfigCache} from "@/lib/database/config-loader";
 import {invalidateGroupInfoCache} from "@/lib/database/group-info";
 import {invalidateSiteSettingsCache} from "@/lib/site-settings";
@@ -175,9 +178,12 @@ function invalidateOperationalCaches(): void {
   invalidateConfigCache();
   invalidateGroupInfoCache();
   invalidateDashboardCache();
+  invalidateGroupDashboardCache();
+  invalidateAvailabilityCache();
   invalidateStorageDiagnosticsCache();
   invalidateSiteSettingsCache();
   invalidateRuntimeMigrationCache();
+  clearPingCache();
 }
 
 function getPasswordConfirmation(formData: FormData): string {
@@ -334,7 +340,7 @@ export async function testManagedPostgresAction(formData: FormData): Promise<nev
 }
 
 export async function importManagedStorageAction(formData: FormData): Promise<never> {
-  return handleAction(formData, "importManagedStorage", "控制面数据已导入目标后端", async () => {
+  return handleAction(formData, "importManagedStorage", "当前数据（含历史记录）已导入目标后端", async () => {
     const draft = updateManagedStorageDraft(readManagedStorageDraft(formData));
     const targetProvider = resolveManagedImportTarget(draft);
 
@@ -381,7 +387,7 @@ export async function activateManagedStorageAction(formData: FormData): Promise<
       currentStorage.provider !== "supabase"
     ) {
       throw new Error(
-        "当前初始化流程还不能在一次启用中同时把现有控制面导入到 Supabase 主库并预热 PostgreSQL 备用库。请先把主后端设为 Supabase（备用后端设为 none）完成导入与启用，随后再把 PostgreSQL 配成备用后端。"
+        "当前初始化流程还不能在一次启用中同时把现有数据（含历史记录）导入到 Supabase 主库并预热 PostgreSQL 备用库。请先把主后端设为 Supabase（备用后端设为 none）完成导入与启用，随后再把 PostgreSQL 配成备用后端。"
       );
     }
 
@@ -395,19 +401,19 @@ export async function activateManagedStorageAction(formData: FormData): Promise<
         throw new Error("请先完成并通过 PostgreSQL 连接测试");
       }
       if (!draft.lastImportOk) {
-        throw new Error("请先把当前控制面数据导入 PostgreSQL，再执行启用");
+        throw new Error("请先把当前数据（含历史记录）导入 PostgreSQL，再执行启用");
       }
     }
 
     if (importTargetProvider === "supabase" && currentStorage.provider !== "supabase") {
       if (!draft.lastImportOk || draft.lastImportSummary?.targetProvider !== "supabase") {
-        throw new Error("请先把当前控制面数据导入 Supabase，再执行启用");
+        throw new Error("请先把当前数据（含历史记录）导入 Supabase，再执行启用");
       }
     }
 
     if (importTargetProvider === "postgres" && currentStorage.provider !== "postgres") {
       if (!draft.lastImportOk || draft.lastImportSummary?.targetProvider !== "postgres") {
-        throw new Error("请先把当前控制面数据导入 PostgreSQL，再执行启用");
+        throw new Error("请先把当前数据（含历史记录）导入 PostgreSQL，再执行启用");
       }
     }
 
@@ -420,11 +426,11 @@ export async function activateManagedStorageAction(formData: FormData): Promise<
       });
 
       if (!verification.sourceMatchesImport) {
-        throw new Error("导入完成后源控制面数据已发生变化，请重新导入后再执行启用，避免切换到过期数据");
+        throw new Error("导入完成后源端数据（含历史记录）已发生变化，请重新导入后再执行启用，避免切换到过期数据");
       }
 
       if (!verification.targetMatchesImport) {
-        throw new Error("目标后端数据与最近一次导入结果不一致，请重新导入后再执行启用");
+        throw new Error("目标后端数据（含历史记录）与最近一次导入结果不一致，请重新导入后再执行启用");
       }
     }
 

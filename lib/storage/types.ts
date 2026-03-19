@@ -1,12 +1,15 @@
 import "server-only";
 
 import type {
+  AvailabilityStats,
   CheckConfigRow,
+  HistorySnapshotRow,
   CheckRequestTemplateRow,
   GroupInfoRow,
   SiteSettingsRow,
   SystemNotificationRow,
 } from "@/lib/types/database";
+import type {CheckResult} from "@/lib/types/check";
 
 export type DatabaseProvider = "supabase" | "postgres" | "sqlite";
 
@@ -89,10 +92,31 @@ export interface NotificationMutationInput {
   is_active: boolean;
 }
 
+export interface RuntimeHistoryQueryOptions {
+  allowedIds?: Iterable<string> | null;
+  limitPerConfig?: number | null;
+}
+
+export interface RuntimeStorage {
+  history: {
+    fetchRows(options?: RuntimeHistoryQueryOptions): Promise<HistorySnapshotRow[]>;
+    append(results: CheckResult[]): Promise<void>;
+    prune(retentionDays: number): Promise<void>;
+    replaceForConfigs(input: {
+      configIds: Iterable<string>;
+      rows: HistorySnapshotRow[];
+    }): Promise<void>;
+  };
+  availability: {
+    listStats(configIds?: Iterable<string> | null): Promise<AvailabilityStats[]>;
+  };
+}
+
 export interface ControlPlaneStorage {
   provider: DatabaseProvider;
   capabilities: StorageCapabilities;
   ensureReady(): Promise<void>;
+  runtime: RuntimeStorage;
   adminUsers: {
     hasAny(): Promise<boolean>;
     list(): Promise<AdminUserRecord[]>;
