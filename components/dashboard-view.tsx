@@ -804,7 +804,7 @@ export function DashboardView({
              </span>
             <div className="h-3 w-[1px] bg-border/60 sm:h-4" />
             <Link
-              href="https://github.com/BingZi-233/check-cx"
+              href="https://github.com/Arron196/modelhealthcheck"
               target="_blank"
               className="flex items-center gap-1 text-[10px] font-medium text-muted-foreground transition-colors hover:text-foreground sm:text-xs"
             >
