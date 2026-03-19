@@ -1,0 +1,6 @@
+services:
+  check-cx:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: check-cx:local

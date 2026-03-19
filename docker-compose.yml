@@ -1,9 +1,6 @@
 services:
   check-cx:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: check-cx:local
+    image: ${CHECK_CX_IMAGE:-ghcr.io/arron196/modelhealthcheck:latest}
     container_name: check-cx
     restart: unless-stopped
     ports:
