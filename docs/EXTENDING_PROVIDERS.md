@@ -7,14 +7,27 @@
 
 ## 1. 扩展 Provider 类型
 
-### 1.1 数据库枚举与 Schema
+### 1.1 先判断你当前跑在哪个后端上
 
-`check_configs.type` 使用 Supabase 枚举 `provider_type`。新增 Provider 必须更新数据库：
+当前仓库支持三种控制面后端：
 
-- `supabase/schema.sql` 与 `supabase/schema-dev.sql`
-- 新建迁移：`ALTER TYPE public.provider_type ADD VALUE ...`（dev schema 同步）
+- **Supabase**：`check_configs.type` 仍受 Supabase schema / enum 约束
+- **直连 Postgres**：控制面表结构由应用自动创建，`check_configs.type` 是 `text`
+- **SQLite**：控制面表结构由应用自动创建，`check_configs.type` 也是 `text`
 
-### 1.2 类型与 UI 标识
+这意味着“新增 Provider 必须改数据库枚举”只对 **Supabase 路径**成立，不是所有部署模式都必须做的第一步。
+
+### 1.2 Supabase 路径下的数据库修改
+
+如果你要在 **Supabase** 后端中正式支持新 Provider，需要同步更新数据库定义：
+
+- `supabase/schema.sql`
+- 必要时同步 `supabase/schema-dev.sql`
+- 新建迁移：`ALTER TYPE public.provider_type ADD VALUE ...`
+
+如果你的部署只使用 SQLite / 直连 Postgres 控制面，本节不是强制前置步骤。
+
+### 1.3 类型与 UI 标识
 
 修改以下文件：
 
@@ -69,8 +82,14 @@ VALUES ('MyVendor 主力', 'myvendor', 'my-model', 'https://api.myvendor.com/v1/
 
 ## 5. 验证清单
 
+- 确认后台配置页能创建 / 编辑新 Provider
 - 轮询日志出现新 Provider 记录
 - Dashboard 卡片可见并显示延迟
 - 官方状态（若已实现）显示正确
 - 状态 API `GET /api/v1/status` 返回新 Provider
+
+## 6. 注意事项
+
+- 如果你要让新 Provider 在 **Supabase** 与 **SQLite / Postgres** 三种模式下都可用，除了代码分支外，还要同步更新所有文档与环境示例，避免只在某一个后端里可配置。
+- 如果目标服务兼容 OpenAI Chat / Responses 协议，优先复用 `type = openai`，通常不值得为了“品牌名不同”单独新增一种 Provider。
 
