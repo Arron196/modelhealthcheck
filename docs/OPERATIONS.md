@@ -1,6 +1,6 @@
 # Check CX 运维手册
 
-本文面向运维与平台工程，描述当前仓库的部署方式、数据库初始化、后台管理与日常排障要点。当前实现不再要求 Supabase 才能运行；它会根据环境变量在 **Supabase / 直连 Postgres / SQLite** 三种后端之间解析当前控制面存储。
+本文面向运维与平台工程，描述当前仓库的部署方式、数据库初始化、后台管理与日常排障要点。当前实现不再要求 Supabase 才能运行；它会根据环境变量在 **Supabase / 直连 Postgres / SQLite** 三种后端之间解析当前控制面存储，并允许在 `/admin/storage` 中维护一个受控的 PostgreSQL / Supabase 主备拓扑。**当你在后台启用了托管主备拓扑后，bootstrap store 中的激活配置会覆盖纯 env 自动解析结果。**
 
 ## 1. 运行环境
 
@@ -85,6 +85,15 @@ Supabase 模式下才提供：
 
 直连 Postgres 目前主要用于**控制面存储**。首次启动时会自动创建控制面所需表，无需先执行 Supabase schema。
 
+如果你要把 PostgreSQL 纳入正式主备管理，请在 `/admin/storage` 中按以下顺序操作：
+
+1. 保存 PostgreSQL 草稿连接与主/备角色
+2. 执行 PostgreSQL 连接测试，确认握手、`public schema` 权限与控制面表覆盖情况
+3. 执行“导入当前控制面到 PostgreSQL 侧”，把管理员、站点设置、检测配置、模板、分组与通知复制到 PostgreSQL（无论它在当前草稿中是主后端还是备用后端）
+4. 启用新的主备拓扑
+
+> 这套托管配置不会写进 `site_settings` 或公开页面，而是写入本地 SQLite bootstrap store（默认 `.sisyphus/local-data/storage-bootstrap.db`，可用 `STORAGE_BOOTSTRAP_SQLITE_PATH` 覆盖）。部署时必须确保该文件所在磁盘可持久化，并把该文件当作**明文 secret 存储**来保护。
+
 当前默认自动建表覆盖：
 
 - `admin_users`
@@ -100,6 +109,13 @@ Supabase 模式下才提供：
 - `availability_stats` 统计视图
 - 数据库租约选主
 - Supabase 运行时迁移能力
+
+### 3.3 托管主备说明
+
+- v1 只支持 **单主单备** 或 **单主无备**：`Supabase primary / PostgreSQL backup`、`PostgreSQL primary / Supabase backup`，或把备用后端显式设为 `none`
+- 备用后端只作为受控切换目标，不做双写
+- PostgreSQL 连接串由后台持久化管理；Supabase 仍使用当前部署环境中的 `SUPABASE_URL` 与 `SUPABASE_SERVICE_ROLE_KEY`
+- 启用动作会更新 bootstrap authority，并在运行时重置 resolver 缓存；若你的部署是多实例，必须确保所有实例共享同一个 bootstrap SQLite 文件或采用单实例滚动切换
 
 ### 3.3 SQLite
 
@@ -119,10 +135,26 @@ SQLite 与直连 Postgres 一样，优先承担控制面读写；首次访问会
 
 ### 4.2 Docker Compose
 
-- 仓库根目录已提供 `Dockerfile` 与 `docker-compose.yml`
-- `docker compose up --build -d` 会直接构建当前仓库，而不是拉取外部镜像
+- 仓库根目录提供默认镜像版 `docker-compose.yml`，以及本地源码构建覆盖文件 `docker-compose.build.yml`
+- 默认 `docker compose up -d` 会拉取 `ghcr.io/arron196/modelhealthcheck:latest`（也可通过 `CHECK_CX_IMAGE` 覆盖）
+- 如果你要本地构建当前仓库，请显式叠加 `docker-compose.build.yml`
+- 当前 GitHub Actions 默认发布的是 `linux/amd64` 镜像；ARM 主机如需直接运行 GHCR 镜像，请改用自建多架构 tag 或本地构建覆盖
 - 若远端后端环境变量为空，容器会自动回退到 `/app/.sisyphus/local-data/app.db`
 - `check-cx-data` 命名卷负责持久化 SQLite 文件
+
+默认镜像启动：
+
+```bash
+cp .env.example .env
+docker compose pull
+docker compose up -d
+```
+
+本地源码构建覆盖：
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+```
 
 ### 4.3 镜像运行注意事项
 
@@ -141,6 +173,7 @@ SQLite 与直连 Postgres 一样，优先承担控制面读写；首次访问会
 - 系统通知
 - 站点设置
 - 存储诊断 / 运行时迁移检查
+- PostgreSQL 候选连接测试 / 只读诊断
 
 ### 5.2 仍可使用 SQL 的场景
 
@@ -195,7 +228,7 @@ VALUES ('OpenAI GPT-4o', 'openai', 'gpt-4o-mini', 'https://api.openai.com/v1/cha
 
 ### 7.5 Docker Compose 中 SQLite 数据丢失
 
-- 确认使用仓库自带的 `docker-compose.yml`
+- 确认使用仓库自带的 `docker-compose.yml`，且本地构建场景额外叠加的是 `docker-compose.build.yml`
 - 不要移除 `check-cx-data` 命名卷
 - 如自定义 `SQLITE_DATABASE_PATH`，请同步调整卷挂载目录
 
