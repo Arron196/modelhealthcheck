@@ -42,7 +42,7 @@ const NAV_ITEMS = [
   {
     href: "/admin/storage",
     label: "存储诊断",
-    description: "后端解析、能力矩阵与控制面检查",
+    description: "主备拓扑、后端解析与控制面检查",
     icon: HardDrive,
   },
   {

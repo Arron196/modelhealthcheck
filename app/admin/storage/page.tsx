@@ -1,4 +1,5 @@
 import {runSupabaseAutoFixAction, runSupabaseAutoMigrateAction} from "@/app/admin/actions";
+import {ManagedStoragePanel} from "@/components/admin/managed-storage-panel";
 import {StorageDiagnosticsClient} from "@/components/admin/storage-diagnostics-client";
 import {AdminPageIntro, AdminStatusBanner} from "@/components/admin/admin-primitives";
 import {requireAdminSession} from "@/lib/admin/auth";
@@ -24,11 +25,13 @@ export default async function AdminStoragePage({searchParams}: AdminStoragePageP
     <div className="space-y-6">
       <AdminPageIntro
         eyebrow="Admin / Storage"
-        title="存储后端诊断"
-        description="这个页面负责说明当前项目到底跑在 Supabase、本地 Postgres 还是 SQLite 上，并把控制面读写能力、后端能力矩阵以及 Supabase 专属控制操作统一收口到一个地方。"
+        title="存储管理与诊断"
+        description="这个页面负责统一管理当前项目的托管存储拓扑：包括 PostgreSQL 连接测试、控制面导入、主备启用，以及当前实际运行在 Supabase、本地 Postgres 还是 SQLite 上的诊断结果。"
       />
 
       {feedback ? <AdminStatusBanner type={feedback.type} message={feedback.message} /> : null}
+
+      <ManagedStoragePanel />
 
       <StorageDiagnosticsClient
         initialSnapshot={initialSnapshot}

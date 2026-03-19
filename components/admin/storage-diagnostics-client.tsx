@@ -4,11 +4,7 @@ import {useCallback, useEffect, useMemo, useRef, useState} from "react";
 import {Database, HardDrive, Loader2, ShieldAlert, Sparkles, Wrench} from "lucide-react";
 
 import type {runSupabaseAutoFixAction, runSupabaseAutoMigrateAction} from "@/app/admin/actions";
-import {
-  AdminPanel,
-  AdminStatCard,
-  AdminStatusBanner,
-} from "@/components/admin/admin-primitives";
+import {AdminPanel, AdminStatCard, AdminStatusBanner} from "@/components/admin/admin-primitives";
 import {buttonVariants} from "@/components/ui/button";
 import type {StorageDiagnosticsSnapshot} from "@/lib/admin/storage-diagnostics-cache";
 import type {StorageDiagnosticCheck} from "@/lib/admin/storage-diagnostics";
@@ -374,12 +370,12 @@ export function StorageDiagnosticsClient(props: {
       </div>
 
       <AdminPanel title="运行建议" description="根据当前后端模式，给出最实际的部署和运维建议。" trailing={<ShieldAlert className="h-4 w-4 text-muted-foreground" />}>
-        <div className="grid gap-3 lg:grid-cols-2">
-          <div className="rounded-[1.5rem] border border-border/40 bg-background/70 px-4 py-4 text-sm leading-7 text-muted-foreground shadow-sm">
-            <span className="font-medium text-foreground">Supabase</span>
-            <br />
-            适合保留现有历史快照、availability 统计、轮询租约和 Supabase 专属诊断能力；但也意味着更多平台级配置依赖。
-          </div>
+          <div className="grid gap-3 lg:grid-cols-2">
+            <div className="rounded-[1.5rem] border border-border/40 bg-background/70 px-4 py-4 text-sm leading-7 text-muted-foreground shadow-sm">
+              <span className="font-medium text-foreground">Supabase</span>
+              <br />
+              适合保留现有历史快照、availability 统计与 Supabase 专属诊断能力；但也意味着更多平台级配置依赖。
+            </div>
           <div className="rounded-[1.5rem] border border-border/40 bg-background/70 px-4 py-4 text-sm leading-7 text-muted-foreground shadow-sm">
             <span className="font-medium text-foreground">Postgres</span>
             <br />

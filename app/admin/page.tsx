@@ -37,7 +37,7 @@ const SECTION_LINKS = [
   {
     href: "/admin/storage",
     label: "存储诊断",
-    summary: "查看当前后端解析结果、能力矩阵以及控制面仓库健康状态。",
+    summary: "管理 PostgreSQL / Supabase 主备拓扑，并查看当前后端解析结果与控制面仓库健康状态。",
     icon: HardDrive,
   },
   {
