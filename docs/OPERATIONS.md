@@ -191,7 +191,7 @@ docker compose -f docker-compose.postgres.yml -f docker-compose.build.yml up -d 
 - 分组信息
 - 系统通知
 - 站点设置
-- 站点浏览器图标（favicon / 侧栏图标）
+- 站点浏览器图标（favicon / 侧栏图标，可直接上传替换）
 - 存储诊断 / 运行时迁移检查
 - PostgreSQL 候选连接测试 / 只读诊断
 

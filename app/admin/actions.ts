@@ -1,5 +1,6 @@
 "use server";
 
+import type {SiteSettingsMutationInput} from "@/lib/storage/types";
 import {revalidatePath} from "next/cache";
 import {redirect} from "next/navigation";
 import {isRedirectError} from "next/dist/client/components/redirect-error";
@@ -24,6 +25,12 @@ import {invalidateConfigCache} from "@/lib/database/config-loader";
 import {invalidateGroupInfoCache} from "@/lib/database/group-info";
 import {invalidateSiteSettingsCache} from "@/lib/site-settings";
 import {
+  deleteManagedSiteIconByUrl,
+  ensureUploadedSiteIcon,
+  saveUploadedSiteIcon,
+  SITE_ICON_UPLOAD_FIELD_NAME,
+} from "@/lib/site-icons";
+import {
   activateManagedStorageDraft,
   recordManagedPostgresTestReport,
   recordManagedStorageImportResult,
@@ -35,7 +42,7 @@ import {createSupabaseControlPlaneStorage} from "@/lib/storage/supabase";
 import {ensureRuntimeMigrations, invalidateRuntimeMigrationCache} from "@/lib/supabase/runtime-migrations";
 import {normalizeProviderEndpoint} from "@/lib/providers/endpoint-utils";
 import {getErrorMessage, logError} from "@/lib/utils";
-import {SITE_SETTINGS_SINGLETON_KEY} from "@/lib/types/site-settings";
+import {DEFAULT_SITE_SETTINGS, SITE_SETTINGS_SINGLETON_KEY} from "@/lib/types/site-settings";
 
 type JsonRecord = Record<string, unknown>;
 type ManagedStorageProvider = "supabase" | "postgres";
@@ -55,28 +62,47 @@ function getBoolean(formData: FormData, key: string): boolean {
   return formData.get(key) === "on";
 }
 
-function normalizeSiteIconUrlInput(formData: FormData): string {
-  const value = getText(formData, "site_icon_url");
-  if (!value) {
-    throw new Error("站点图标地址不能为空");
-  }
+function normalizeSettingValue(value: string | null | undefined, fallback: string): string {
+  const normalized = value?.trim();
+  return normalized ? normalized : fallback;
+}
 
-  if (value.startsWith("/")) {
-    return value;
-  }
+async function resolveSiteSettingsPayload(
+  storage: Awaited<ReturnType<typeof getControlPlaneStorage>>
+): Promise<SiteSettingsMutationInput> {
+  const current = await storage.siteSettings.getSingleton(SITE_SETTINGS_SINGLETON_KEY);
 
-  try {
-    const url = new URL(value);
-    if (url.protocol !== "http:" && url.protocol !== "https:") {
-      throw new Error("站点图标仅支持站内绝对路径或 http/https URL");
-    }
-    return url.toString();
-  } catch (error) {
-    if (error instanceof Error && error.message.includes("仅支持")) {
-      throw error;
-    }
-    throw new Error("站点图标仅支持站内绝对路径或 http/https URL");
-  }
+  return {
+    singleton_key: SITE_SETTINGS_SINGLETON_KEY,
+    site_name: normalizeSettingValue(current?.site_name, DEFAULT_SITE_SETTINGS.siteName),
+    site_description: normalizeSettingValue(
+      current?.site_description,
+      DEFAULT_SITE_SETTINGS.siteDescription
+    ),
+    site_icon_url: normalizeSettingValue(current?.site_icon_url, DEFAULT_SITE_SETTINGS.siteIconUrl),
+    hero_badge: normalizeSettingValue(current?.hero_badge, DEFAULT_SITE_SETTINGS.heroBadge),
+    hero_title_primary: normalizeSettingValue(
+      current?.hero_title_primary,
+      DEFAULT_SITE_SETTINGS.heroTitlePrimary
+    ),
+    hero_title_secondary: normalizeSettingValue(
+      current?.hero_title_secondary,
+      DEFAULT_SITE_SETTINGS.heroTitleSecondary
+    ),
+    hero_description: normalizeSettingValue(
+      current?.hero_description,
+      DEFAULT_SITE_SETTINGS.heroDescription
+    ),
+    footer_brand: normalizeSettingValue(current?.footer_brand, DEFAULT_SITE_SETTINGS.footerBrand),
+    admin_console_title: normalizeSettingValue(
+      current?.admin_console_title,
+      DEFAULT_SITE_SETTINGS.adminConsoleTitle
+    ),
+    admin_console_description: normalizeSettingValue(
+      current?.admin_console_description,
+      DEFAULT_SITE_SETTINGS.adminConsoleDescription
+    ),
+  };
 }
 
 function parseJsonRecord(formData: FormData, key: string, label: string): JsonRecord | null {
@@ -498,7 +524,6 @@ export async function upsertSiteSettingsAction(formData: FormData): Promise<neve
   return handleAction(formData, "upsertSiteSettings", "站点设置已保存", async () => {
     const siteName = getText(formData, "site_name");
     const siteDescription = getText(formData, "site_description");
-    const siteIconUrl = normalizeSiteIconUrlInput(formData);
     const heroBadge = getText(formData, "hero_badge");
     const heroTitlePrimary = getText(formData, "hero_title_primary");
     const heroTitleSecondary = getText(formData, "hero_title_secondary");
@@ -522,11 +547,11 @@ export async function upsertSiteSettingsAction(formData: FormData): Promise<neve
     }
 
     const storage = await getControlPlaneStorage();
+    const currentSettings = await resolveSiteSettingsPayload(storage);
     await storage.siteSettings.upsert({
-      singleton_key: SITE_SETTINGS_SINGLETON_KEY,
+      ...currentSettings,
       site_name: siteName,
       site_description: siteDescription,
-      site_icon_url: siteIconUrl,
       hero_badge: heroBadge,
       hero_title_primary: heroTitlePrimary,
       hero_title_secondary: heroTitleSecondary,
@@ -535,6 +560,41 @@ export async function upsertSiteSettingsAction(formData: FormData): Promise<neve
       admin_console_title: adminConsoleTitle,
       admin_console_description: adminConsoleDescription,
     });
+  });
+}
+
+export async function uploadSiteIconAction(formData: FormData): Promise<never> {
+  return handleAction(formData, "uploadSiteIcon", "站点图标已上传并应用", async () => {
+    const uploadedFile = ensureUploadedSiteIcon(formData.get(SITE_ICON_UPLOAD_FIELD_NAME));
+    const storage = await getControlPlaneStorage();
+    const currentSettings = await resolveSiteSettingsPayload(storage);
+    const nextIconUrl = await saveUploadedSiteIcon(uploadedFile);
+
+    try {
+      await storage.siteSettings.upsert({
+        ...currentSettings,
+        site_icon_url: nextIconUrl,
+      });
+    } catch (error) {
+      await deleteManagedSiteIconByUrl(nextIconUrl);
+      throw error;
+    }
+
+    await deleteManagedSiteIconByUrl(currentSettings.site_icon_url);
+  });
+}
+
+export async function resetSiteIconAction(formData: FormData): Promise<never> {
+  return handleAction(formData, "resetSiteIcon", "站点图标已恢复默认", async () => {
+    const storage = await getControlPlaneStorage();
+    const currentSettings = await resolveSiteSettingsPayload(storage);
+
+    await storage.siteSettings.upsert({
+      ...currentSettings,
+      site_icon_url: DEFAULT_SITE_SETTINGS.siteIconUrl,
+    });
+
+    await deleteManagedSiteIconByUrl(currentSettings.site_icon_url);
   });
 }
 
