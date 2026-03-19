@@ -51,6 +51,19 @@ let poolCache:
     }
   | null = null;
 
+export async function resetPostgresControlPlaneStorageCache(): Promise<void> {
+  if (!poolCache) {
+    return;
+  }
+
+  const current = poolCache;
+  poolCache = null;
+  try {
+    await current.pool.end();
+  } catch {
+  }
+}
+
 function isLocalHost(hostname: string): boolean {
   return ["localhost", "127.0.0.1"].includes(hostname);
 }
@@ -179,6 +192,22 @@ export function createPostgresControlPlaneStorage(connectionString: string): Con
           wrapError("读取管理员账户", error);
         }
       },
+      async list() {
+        await ensureReady();
+        try {
+          const result = await pool.query(
+            `
+              SELECT id, username, password_hash, last_login_at, created_at, updated_at
+              FROM admin_users
+              ORDER BY username ASC
+            `
+          );
+
+          return mapRows(result.rows).map(mapAdminUserRecord);
+        } catch (error) {
+          wrapError("读取管理员账户列表", error);
+        }
+      },
       async findByUsername(username) {
         await ensureReady();
         try {
@@ -222,6 +251,45 @@ export function createPostgresControlPlaneStorage(connectionString: string): Con
           return mapAdminUserRecord(result.rows[0] as Record<string, unknown>);
         } catch (error) {
           wrapError("创建管理员账户", error);
+        }
+      },
+      async replaceAll(records) {
+        await ensureReady();
+        const client = await pool.connect();
+        try {
+          await client.query("BEGIN");
+          await client.query(`DELETE FROM admin_users`);
+
+          for (const row of records) {
+            await client.query(
+              `
+                INSERT INTO admin_users (
+                  id,
+                  username,
+                  password_hash,
+                  last_login_at,
+                  created_at,
+                  updated_at
+                )
+                VALUES ($1, $2, $3, $4, $5, $6)
+              `,
+              [
+                row.id,
+                row.username,
+                row.password_hash,
+                row.last_login_at ?? null,
+                row.created_at ?? nowIso(),
+                row.updated_at ?? nowIso(),
+              ]
+            );
+          }
+
+          await client.query("COMMIT");
+        } catch (error) {
+          await client.query("ROLLBACK");
+          wrapError("导入管理员账户", error);
+        } finally {
+          client.release();
         }
       },
       async updateLastLoginAt(id, lastLoginAt) {
