@@ -2,7 +2,6 @@ import "server-only";
 
 import {
   getControlPlaneStorage,
-  getDirectPostgresConnectionState,
   getStorageCapabilities,
   getRuntimeStorageResolution,
   resolveDatabaseBackend,
@@ -89,8 +88,8 @@ const CAPABILITY_LABELS: Array<{
   {
     id: "pollerLease",
     label: "轮询租约",
-    enabledDetail: "支持分布式轮询主节点租约机制。",
-    disabledDetail: "当前后端不提供分布式租约语义，适合单节点运行。",
+    enabledDetail: "该能力标记主要用于说明与上游后端能力兼容；当前仓库默认部署模型仍按单进程轮询运行。",
+    disabledDetail: "当前后端不提供租约相关兼容能力，部署时按单节点模式理解即可。",
   },
   {
     id: "runtimeMigrations",
@@ -158,7 +157,6 @@ function getBackendChecks(
   }
 ): StorageDiagnosticCheck[] {
   const backend = resolveDatabaseBackend();
-  const postgres = getDirectPostgresConnectionState();
   const runtime = getRuntimeStorageResolution();
   const activeProvider = runtime?.activeProvider ?? backend.provider;
   const preferredProvider = runtime?.preferredProvider ?? backend.provider;
@@ -208,16 +206,17 @@ function getBackendChecks(
   }
 
   if (activeProvider === "postgres") {
+    const source = runtime?.postgresConnectionSource ?? backend.postgresConnectionSource;
     checks.push({
       id: "backend-postgres-source",
       label: "Postgres 连接来源",
-      status: postgres.connectionString ? "pass" : "fail",
-      detail: postgres.connectionString
-        ? `已从 ${postgres.source} 解析到直连数据库连接串`
+      status: source ? "pass" : "fail",
+      detail: source
+        ? `已从 ${source} 解析到当前 PostgreSQL 连接`
         : "未解析到直连数据库连接串",
-      hint: postgres.connectionString
+      hint: source
         ? "当前模式会自动准备控制面表，但高级 Supabase 诊断将隐藏。"
-        : "请配置 DATABASE_URL / POSTGRES_URL / POSTGRES_PRISMA_URL / SUPABASE_DB_URL。",
+        : "请先在托管存储配置中保存并启用 PostgreSQL，或补齐 DATABASE_URL / POSTGRES_URL / POSTGRES_PRISMA_URL / SUPABASE_DB_URL。",
     });
   }
 
