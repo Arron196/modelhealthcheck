@@ -150,11 +150,14 @@ async function loadDashboardDataInternal(options?: {
       refreshMode
     );
 
-    const providerTimelines = buildProviderTimelines(history, maintenanceConfigs);
+    const providerTimelines = buildProviderTimelines(history, maintenanceConfigs, activeConfigs);
 
     let lastUpdated: string | null = null;
     let lastUpdatedMs = 0;
     for (const timeline of providerTimelines) {
+      if (timeline.items.length === 0) {
+        continue;
+      }
       const checkedAtMs = Date.parse(timeline.latest.checkedAt);
       if (Number.isFinite(checkedAtMs) && checkedAtMs > lastUpdatedMs) {
         lastUpdatedMs = checkedAtMs;

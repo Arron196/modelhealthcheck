@@ -105,7 +105,8 @@ export async function loadSnapshotForScope(
 
 export function buildProviderTimelines(
   history: HistorySnapshot,
-  maintenanceConfigs: ProviderConfig[]
+  maintenanceConfigs: ProviderConfig[],
+  activeConfigs: ProviderConfig[]
 ): ProviderTimeline[] {
   const mapped = Object.entries(history)
     .map<ProviderTimeline | null>(([id, items]) => {
@@ -122,9 +123,13 @@ export function buildProviderTimelines(
     })
     .filter((timeline): timeline is ProviderTimeline => Boolean(timeline));
 
+  const historyIds = new Set(mapped.map((timeline) => timeline.id));
+  const pendingTimelines = activeConfigs
+    .filter((config) => !historyIds.has(config.id))
+    .map(createPendingTimeline);
   const maintenanceTimelines = maintenanceConfigs.map(createMaintenanceTimeline);
 
-  return [...mapped, ...maintenanceTimelines].sort((a, b) =>
+  return [...mapped, ...pendingTimelines, ...maintenanceTimelines].sort((a, b) =>
     a.latest.name.localeCompare(b.latest.name)
   );
 }
@@ -148,6 +153,28 @@ function createMaintenanceTimeline(config: ProviderConfig): ProviderTimeline {
     latencyMs: null,
     pingLatencyMs: null,
     message: "配置处于维护模式",
+    checkedAt: new Date().toISOString(),
+    groupName: config.groupName || null,
+  };
+
+  return {
+    id: config.id,
+    items: [],
+    latest: attachOfficialStatus(base),
+  };
+}
+
+function createPendingTimeline(config: ProviderConfig): ProviderTimeline {
+  const base: CheckResult = {
+    id: config.id,
+    name: config.name,
+    type: config.type,
+    endpoint: config.endpoint,
+    model: config.model,
+    status: "pending",
+    latencyMs: null,
+    pingLatencyMs: null,
+    message: "配置已启用，等待首次检查结果",
     checkedAt: new Date().toISOString(),
     groupName: config.groupName || null,
   };

@@ -45,6 +45,12 @@ export const STATUS_META: Record<
     badge: "danger",
     dot: "bg-red-600",
   },
+  pending: {
+    label: "待检查",
+    description: "配置已启用，等待首次检查结果",
+    badge: "secondary",
+    dot: "bg-slate-400",
+  },
 };
 
 export const OFFICIAL_STATUS_META: Record<
