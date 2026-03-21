@@ -3,6 +3,7 @@ import "server-only";
 import type {PostgrestError} from "@supabase/supabase-js";
 
 import {createAdminClient} from "@/lib/supabase/admin";
+import type {AvailabilityStats} from "@/lib/types/database";
 import {getErrorMessage} from "@/lib/utils";
 
 import type {
@@ -47,9 +48,134 @@ const capabilities: StorageCapabilities = {
 const DEFAULT_HISTORY_LIMIT = 60;
 const RPC_RECENT_HISTORY = "get_recent_check_history";
 const RPC_PRUNE_HISTORY = "prune_check_history";
+const LEGACY_TEMPLATES_WARNING =
+  "请求模板表尚未初始化，当前回退到内置默认模板。请补齐最新 Supabase schema / migration。";
+
+interface CheckConfigSelectProfile {
+  columns: string;
+  supportsUpdatedAtOrder: boolean;
+  supportsCreatedAtOrder: boolean;
+}
+
+const CHECK_CONFIG_SELECT_PROFILES: CheckConfigSelectProfile[] = [
+  {
+    columns:
+      "id, name, type, model, endpoint, api_key, enabled, is_maintenance, template_id, request_header, metadata, group_name, created_at, updated_at",
+    supportsUpdatedAtOrder: true,
+    supportsCreatedAtOrder: true,
+  },
+  {
+    columns:
+      "id, name, type, model, endpoint, api_key, enabled, is_maintenance, request_header, metadata, created_at, updated_at",
+    supportsUpdatedAtOrder: true,
+    supportsCreatedAtOrder: true,
+  },
+  {
+    columns: "id, name, type, model, endpoint, api_key, enabled, is_maintenance, created_at, updated_at",
+    supportsUpdatedAtOrder: true,
+    supportsCreatedAtOrder: true,
+  },
+  {
+    columns: "id, name, type, model, endpoint, api_key, enabled, is_maintenance, created_at",
+    supportsUpdatedAtOrder: false,
+    supportsCreatedAtOrder: true,
+  },
+  {
+    columns: "id, name, type, model, endpoint, api_key, enabled, is_maintenance",
+    supportsUpdatedAtOrder: false,
+    supportsCreatedAtOrder: false,
+  },
+];
 
 function wrapStorageError(action: string, error: unknown): never {
   throw new Error(`${action}失败：${getErrorMessage(error)}`);
+}
+
+function isSchemaLikeError(error: PostgrestError | null): boolean {
+  if (!error) {
+    return false;
+  }
+
+  return /does not exist|relation|column|schema|invalid schema|cache lookup failed|schema cache|Could not find/i.test(
+    getErrorMessage(error)
+  );
+}
+
+function buildAvailabilityStatsFromHistoryRows(
+  rows: Array<Record<string, unknown>>
+): AvailabilityStats[] {
+  const periods = [
+    {label: "7d" as const, cutoffMs: Date.now() - 7 * 24 * 60 * 60 * 1000},
+    {label: "15d" as const, cutoffMs: Date.now() - 15 * 24 * 60 * 60 * 1000},
+    {label: "30d" as const, cutoffMs: Date.now() - 30 * 24 * 60 * 60 * 1000},
+  ];
+
+  const aggregates = new Map<
+    string,
+    Record<AvailabilityStats["period"], {total_checks: number; operational_count: number}>
+  >();
+
+  for (const row of rows) {
+    const configId = typeof row.config_id === "string" ? row.config_id : "";
+    if (!configId) {
+      continue;
+    }
+
+    const checkedAtSource = row.checked_at;
+    const checkedAtValue =
+      checkedAtSource instanceof Date
+        ? checkedAtSource.getTime()
+        : Date.parse(String(checkedAtSource ?? ""));
+
+    if (!Number.isFinite(checkedAtValue)) {
+      continue;
+    }
+
+    const status = typeof row.status === "string" ? row.status : "";
+    const entry =
+      aggregates.get(configId) ?? {
+        "7d": {total_checks: 0, operational_count: 0},
+        "15d": {total_checks: 0, operational_count: 0},
+        "30d": {total_checks: 0, operational_count: 0},
+      };
+
+    for (const period of periods) {
+      if (checkedAtValue > period.cutoffMs) {
+        entry[period.label].total_checks += 1;
+        if (status === "operational") {
+          entry[period.label].operational_count += 1;
+        }
+      }
+    }
+
+    aggregates.set(configId, entry);
+  }
+
+  return [...aggregates.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .flatMap(([configId, stats]) =>
+      periods.flatMap((period) => {
+        const aggregate = stats[period.label];
+        if (aggregate.total_checks === 0) {
+          return [];
+        }
+
+        return [
+          {
+            config_id: configId,
+            period: period.label,
+            total_checks: aggregate.total_checks,
+            operational_count: aggregate.operational_count,
+            availability_pct:
+              aggregate.total_checks === 0
+                ? null
+                : Math.round(
+                    (10000 * aggregate.operational_count) / aggregate.total_checks
+                  ) / 100,
+          },
+        ];
+      })
+    );
 }
 
 function chunkRows<T>(rows: T[], size: number): T[][] {
@@ -63,6 +189,9 @@ function chunkRows<T>(rows: T[], size: number): T[][] {
 export function createSupabaseControlPlaneStorage(input?: {allowDraft?: boolean}): ControlPlaneStorage {
   const allowDraft = input?.allowDraft;
   let readyPromise: Promise<void> | null = null;
+  let requestTemplatesRelationAvailable: boolean | null = null;
+  let availabilityStatsViewAvailable: boolean | null = null;
+  let checkConfigSelectProfileIndex = 0;
 
   async function ensureReady(): Promise<void> {
     if (readyPromise) {
@@ -85,8 +214,16 @@ export function createSupabaseControlPlaneStorage(input?: {allowDraft?: boolean}
         );
 
       if (error) {
+        if (isSchemaLikeError(error)) {
+          requestTemplatesRelationAvailable = false;
+          console.warn(`[check-cx] ${LEGACY_TEMPLATES_WARNING}`);
+          return;
+        }
+
         wrapStorageError("初始化默认请求模板", error);
       }
+
+      requestTemplatesRelationAvailable = true;
     })().catch((error) => {
       readyPromise = null;
       throw error;
@@ -105,19 +242,126 @@ export function createSupabaseControlPlaneStorage(input?: {allowDraft?: boolean}
   }
 
   function isMissingFunctionError(error: PostgrestError | null): boolean {
-    if (!error?.message) {
+    if (!error) {
       return false;
     }
 
-    return error.message.includes(RPC_RECENT_HISTORY) || error.message.includes(RPC_PRUNE_HISTORY);
+    const message = getErrorMessage(error);
+    return message.includes(RPC_RECENT_HISTORY) || message.includes(RPC_PRUNE_HISTORY);
   }
 
   function isMissingSiteIconColumnError(error: PostgrestError | null): boolean {
-    if (!error?.message) {
+    if (!error) {
       return false;
     }
 
-    return error.message.includes("site_icon_url");
+    return getErrorMessage(error).includes("site_icon_url");
+  }
+
+  async function selectCheckConfigList(input?: {enabledOnly?: boolean}) {
+    const client = createAdminClient({allowDraft});
+    let lastSchemaError: PostgrestError | null = null;
+
+    for (
+      let profileIndex = checkConfigSelectProfileIndex;
+      profileIndex < CHECK_CONFIG_SELECT_PROFILES.length;
+      profileIndex += 1
+    ) {
+      const profile = CHECK_CONFIG_SELECT_PROFILES[profileIndex];
+      let query = client.from("check_configs").select(profile.columns);
+
+      if (input?.enabledOnly) {
+        query = query.eq("enabled", true);
+      }
+
+      if (profile.supportsUpdatedAtOrder) {
+        query = query.order("updated_at", {ascending: false});
+      }
+      if (profile.supportsCreatedAtOrder) {
+        query = query.order("created_at", {ascending: false});
+      }
+
+      const {data, error} = await query;
+      if (!error) {
+        checkConfigSelectProfileIndex = profileIndex;
+        const rows = ((data as unknown as Array<Record<string, unknown>> | null) ?? []).map((row) =>
+          mapCheckConfigRow(row)
+        );
+        return rows;
+      }
+
+      if (!isSchemaLikeError(error)) {
+        wrapStorageError("读取检测配置", error);
+      }
+
+      lastSchemaError = error;
+    }
+
+    wrapStorageError("读取检测配置", lastSchemaError);
+  }
+
+  async function selectCheckConfigById(id: string) {
+    const client = createAdminClient({allowDraft});
+    let lastSchemaError: PostgrestError | null = null;
+
+    for (
+      let profileIndex = checkConfigSelectProfileIndex;
+      profileIndex < CHECK_CONFIG_SELECT_PROFILES.length;
+      profileIndex += 1
+    ) {
+      const profile = CHECK_CONFIG_SELECT_PROFILES[profileIndex];
+      const {data, error} = await client
+        .from("check_configs")
+        .select(profile.columns)
+        .eq("id", id)
+        .maybeSingle();
+
+      if (!error) {
+        checkConfigSelectProfileIndex = profileIndex;
+        return data ? mapCheckConfigRow(data as unknown as Record<string, unknown>) : null;
+      }
+
+      if (!isSchemaLikeError(error)) {
+        wrapStorageError("读取检测配置", error);
+      }
+
+      lastSchemaError = error;
+    }
+
+    wrapStorageError("读取检测配置", lastSchemaError);
+  }
+
+  async function fallbackListAvailabilityStats(normalizedIds: string[] | null) {
+    const client = createAdminClient({allowDraft});
+    const cutoff30d = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const historyRows: Array<Record<string, unknown>> = [];
+    const pageSize = 1000;
+
+    for (let offset = 0; ; offset += pageSize) {
+      let query = client
+        .from("check_history")
+        .select("config_id, status, checked_at")
+        .gte("checked_at", cutoff30d)
+        .order("checked_at", {ascending: false})
+        .range(offset, offset + pageSize - 1);
+
+      if (normalizedIds) {
+        query = query.in("config_id", normalizedIds);
+      }
+
+      const {data, error} = await query;
+      if (error) {
+        wrapStorageError("读取可用性统计", error);
+      }
+
+      const page = (data as Array<Record<string, unknown>> | null) ?? [];
+      historyRows.push(...page);
+      if (page.length < pageSize) {
+        break;
+      }
+    }
+
+    return buildAvailabilityStatsFromHistoryRows(historyRows);
   }
 
   async function fallbackFetchHistoryRows(allowedIds: string[] | null, limitPerConfig?: number | null) {
@@ -317,6 +561,10 @@ export function createSupabaseControlPlaneStorage(input?: {allowDraft?: boolean}
       return [];
     }
 
+    if (availabilityStatsViewAvailable === false) {
+      return fallbackListAvailabilityStats(normalizedIds);
+    }
+
     const client = createAdminClient({allowDraft});
     let query = client
       .from("availability_stats")
@@ -330,8 +578,15 @@ export function createSupabaseControlPlaneStorage(input?: {allowDraft?: boolean}
 
     const {data, error} = await query;
     if (error) {
+      if (isSchemaLikeError(error)) {
+        availabilityStatsViewAvailable = false;
+        return fallbackListAvailabilityStats(normalizedIds);
+      }
+
       wrapStorageError("读取可用性统计", error);
     }
+
+    availabilityStatsViewAvailable = true;
 
     return ((data as Array<Record<string, unknown>> | null) ?? []).map(mapAvailabilityStatsRow);
   }
@@ -511,43 +766,11 @@ export function createSupabaseControlPlaneStorage(input?: {allowDraft?: boolean}
     checkConfigs: {
       async list(input) {
         await ensureReady();
-        const client = createAdminClient({allowDraft});
-        let query = client
-          .from("check_configs")
-          .select(
-            "id, name, type, model, endpoint, api_key, enabled, is_maintenance, template_id, request_header, metadata, group_name, created_at, updated_at"
-          )
-          .order("updated_at", {ascending: false})
-          .order("created_at", {ascending: false});
-
-        if (input?.enabledOnly) {
-          query = query.eq("enabled", true);
-        }
-
-        const {data, error} = await query;
-
-        if (error) {
-          wrapStorageError("读取检测配置", error);
-        }
-
-        return ((data as Array<Record<string, unknown>> | null) ?? []).map(mapCheckConfigRow);
+        return selectCheckConfigList({enabledOnly: input?.enabledOnly});
       },
       async getById(id) {
         await ensureReady();
-        const client = createAdminClient({allowDraft});
-        const {data, error} = await client
-          .from("check_configs")
-          .select(
-            "id, name, type, model, endpoint, api_key, enabled, is_maintenance, template_id, request_header, metadata, group_name, created_at, updated_at"
-          )
-          .eq("id", id)
-          .maybeSingle();
-
-        if (error) {
-          wrapStorageError("读取检测配置", error);
-        }
-
-        return data ? mapCheckConfigRow(data as Record<string, unknown>) : null;
+        return selectCheckConfigById(id);
       },
       async upsert(input: CheckConfigMutationInput) {
         await ensureReady();
@@ -617,6 +840,11 @@ export function createSupabaseControlPlaneStorage(input?: {allowDraft?: boolean}
     requestTemplates: {
       async list() {
         await ensureReady();
+
+        if (requestTemplatesRelationAvailable === false) {
+          return getDefaultRequestTemplateRows();
+        }
+
         const client = createAdminClient({allowDraft});
         const {data, error} = await client
           .from("check_request_templates")
@@ -625,8 +853,16 @@ export function createSupabaseControlPlaneStorage(input?: {allowDraft?: boolean}
           .order("created_at", {ascending: false});
 
         if (error) {
+          if (isSchemaLikeError(error)) {
+            requestTemplatesRelationAvailable = false;
+            console.warn(`[check-cx] ${LEGACY_TEMPLATES_WARNING}`);
+            return getDefaultRequestTemplateRows();
+          }
+
           wrapStorageError("读取请求模板", error);
         }
+
+        requestTemplatesRelationAvailable = true;
 
         return ((data as Array<Record<string, unknown>> | null) ?? []).map(mapRequestTemplateRow);
       },

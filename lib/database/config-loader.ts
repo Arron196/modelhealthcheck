@@ -104,9 +104,14 @@ export async function loadProviderConfigsFromDB(options?: {
     metrics.misses += 1;
 
     const storage = await getControlPlaneStorage();
+    const templatesPromise = storage.requestTemplates.list().catch((error) => {
+      logError("加载请求模板时发生异常", error);
+      return [] as CheckRequestTemplateRow[];
+    });
+
     const [data, templates] = await Promise.all([
       storage.checkConfigs.list({enabledOnly: true}),
-      storage.requestTemplates.list(),
+      templatesPromise,
     ]);
 
     if (data.length === 0) {
