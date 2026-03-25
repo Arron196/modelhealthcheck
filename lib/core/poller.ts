@@ -8,10 +8,11 @@ import {loadProviderConfigsFromDB} from "../database/config-loader";
 import {runProviderChecks} from "../providers";
 import {invalidateDashboardCache} from "./dashboard-data";
 import {clearPingCache} from "./global-state";
-import {getPollingIntervalMs} from "./polling-config";
+import {getCheckConcurrency, getPollingIntervalMs} from "./polling-config";
 import {getLastPingStartedAt, getPollerTimer, setLastPingStartedAt, setPollerTimer,} from "./global-state";
 import {startOfficialStatusPoller} from "./official-status-poller";
 import type {CheckResult, HealthStatus} from "../types";
+import {PROVIDER_CHECK_ATTEMPT_TIMEOUT_MS, PROVIDER_CHECK_MAX_ATTEMPTS} from "../providers";
 
 const POLL_INTERVAL_MS = getPollingIntervalMs();
 const FAILURE_STATUSES: ReadonlySet<HealthStatus> = new Set([
@@ -19,6 +20,11 @@ const FAILURE_STATUSES: ReadonlySet<HealthStatus> = new Set([
   "validation_failed",
   "error",
 ]);
+const POLLER_STARTUP_BUDGET_MS = 2 * 60_000;
+const POLLER_FLUSH_BUFFER_MS = 30_000;
+
+let activeTickBudgetMs: number | null = null;
+let activeTickRunId = 0;
 
 function isFailureResult(result: CheckResult): boolean {
   return FAILURE_STATUSES.has(result.status);
@@ -128,6 +134,18 @@ function requestRecoveryTick(reason: string): void {
     });
 }
 
+function getTickBudgetMs(configCount: number): number {
+  if (configCount <= 0) {
+    return POLLER_STARTUP_BUDGET_MS;
+  }
+
+  const concurrency = getCheckConcurrency();
+  const batches = Math.max(1, Math.ceil(configCount / concurrency));
+  const maxSingleConfigDurationMs =
+    PROVIDER_CHECK_ATTEMPT_TIMEOUT_MS * PROVIDER_CHECK_MAX_ATTEMPTS;
+  return batches * maxSingleConfigDurationMs + POLLER_FLUSH_BUFFER_MS;
+}
+
 function startCheckPoller(): void {
   if (isBuildPhase()) {
     return;
@@ -164,20 +182,34 @@ async function tick() {
   if (globalThis.__checkCxPollerRunning) {
     const lastStartedAt = getLastPingStartedAt();
     const duration = lastStartedAt ? Date.now() - lastStartedAt : null;
-    console.log(
-      `[check-cx] 跳过 ping：上一轮仍在执行${
-        duration !== null ? `（已耗时 ${duration}ms）` : ""
-      }`
-    );
-    return;
+    if (duration !== null && activeTickBudgetMs !== null && duration > activeTickBudgetMs) {
+      console.error(
+        `[check-cx] 检测到上一轮轮询卡住，已强制释放运行锁（elapsed=${duration}ms, budget=${activeTickBudgetMs}ms）`
+      );
+      activeTickRunId += 1;
+      activeTickBudgetMs = null;
+      globalThis.__checkCxPollerRunning = false;
+    } else {
+      console.log(
+        `[check-cx] 跳过 ping：上一轮仍在执行${
+          duration !== null ? `（已耗时 ${duration}ms）` : ""
+        }`
+      );
+      return;
+    }
   }
+
   globalThis.__checkCxPollerRunning = true;
+  activeTickRunId += 1;
+  const tickRunId = activeTickRunId;
+  activeTickBudgetMs = POLLER_STARTUP_BUDGET_MS;
 
   setLastPingStartedAt(Date.now());
   try {
     const allConfigs = await loadProviderConfigsFromDB();
     // 过滤掉维护中的配置
     const configs = allConfigs.filter((cfg) => !cfg.is_maintenance);
+    activeTickBudgetMs = getTickBudgetMs(configs.length);
 
     if (configs.length === 0) {
       return;
@@ -194,7 +226,10 @@ async function tick() {
   } catch (error) {
     console.error("[check-cx] 轮询检测失败", error);
   } finally {
-    globalThis.__checkCxPollerRunning = false;
+    if (tickRunId === activeTickRunId) {
+      activeTickBudgetMs = null;
+      globalThis.__checkCxPollerRunning = false;
+    }
   }
 }
 
