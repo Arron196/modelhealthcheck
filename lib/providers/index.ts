@@ -10,8 +10,31 @@ import { getCheckConcurrency } from "../core/polling-config";
 
 // 最多尝试 3 次：初始一次 + 2 次重试
 const MAX_REQUEST_ABORT_RETRIES = 2;
+export const PROVIDER_CHECK_ATTEMPT_TIMEOUT_MS = 60_000;
+export const PROVIDER_CHECK_MAX_ATTEMPTS = MAX_REQUEST_ABORT_RETRIES + 1;
 const TRANSIENT_FAILURE_PATTERN =
   /request was aborted\.?|timeout|请求超时|No output generated|回复为空|server_error|temporarily unavailable|overloaded/i;
+
+async function runWithHardTimeout<T>(
+  operation: () => Promise<T>,
+  timeoutMs: number,
+  label: string
+): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new Error(`${label} 请求超时（>${timeoutMs}ms）`));
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([operation(), timeoutPromise]);
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
+}
 
 function shouldRetryTransientFailure(...messages: Array<string | undefined>): boolean {
   const combined = messages.filter(Boolean).join("\n");
@@ -24,7 +47,11 @@ function shouldRetryTransientFailure(...messages: Array<string | undefined>): bo
 async function checkWithRetry(config: ProviderConfig): Promise<CheckResult> {
   for (let attempt = 0; attempt <= MAX_REQUEST_ABORT_RETRIES; attempt += 1) {
     try {
-      const result = await checkWithAiSdk(config);
+      const result = await runWithHardTimeout(
+        () => checkWithAiSdk(config),
+        PROVIDER_CHECK_ATTEMPT_TIMEOUT_MS,
+        `${config.name} 第 ${attempt + 1} 次检测`
+      );
       if (
         (result.status === "failed" || result.status === "error") &&
         shouldRetryTransientFailure(result.message, result.logMessage) &&

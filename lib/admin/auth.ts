@@ -1,6 +1,7 @@
 import "server-only";
 
 import {createHmac, randomBytes, randomUUID, scrypt as scryptCallback, timingSafeEqual} from "node:crypto";
+import {isIP} from "node:net";
 import {promisify} from "node:util";
 import {cookies, headers} from "next/headers";
 import {redirect} from "next/navigation";
@@ -60,6 +61,94 @@ function encodeBase64Url(input: string): string {
 
 function decodeBase64Url(input: string): string {
   return Buffer.from(input, "base64url").toString("utf8");
+}
+
+function getPrimaryHeaderValue(value: string | null): string | null {
+  const normalized = value?.split(",")[0]?.trim().toLowerCase();
+  return normalized ? normalized : null;
+}
+
+function parseForwardedProto(forwarded: string | null): "http" | "https" | null {
+  if (!forwarded) {
+    return null;
+  }
+
+  const match = forwarded.match(/proto=(https?|wss?)/i);
+  if (!match) {
+    return null;
+  }
+
+  return match[1].startsWith("https") || match[1].startsWith("wss") ? "https" : "http";
+}
+
+function extractHostname(host: string | null): string | null {
+  const normalized = host?.trim();
+  if (!normalized) {
+    return null;
+  }
+
+  if (normalized.startsWith("[")) {
+    const closingBracketIndex = normalized.indexOf("]");
+    if (closingBracketIndex === -1) {
+      return normalized.slice(1).toLowerCase();
+    }
+    return normalized.slice(1, closingBracketIndex).toLowerCase();
+  }
+
+  return normalized.split(":")[0]?.trim().toLowerCase() || null;
+}
+
+function isDirectHost(hostname: string | null): boolean {
+  if (!hostname) {
+    return false;
+  }
+
+  if (hostname === "localhost" || hostname.endsWith(".localhost") || hostname === "::1") {
+    return true;
+  }
+
+  const ipVersion = isIP(hostname);
+  if (ipVersion === 4) {
+    return true;
+  }
+
+  return ipVersion === 6;
+}
+
+async function shouldUseSecureSessionCookie(): Promise<boolean> {
+  const headerStore = await headers();
+  const forwardedProto = getPrimaryHeaderValue(headerStore.get("x-forwarded-proto"));
+  if (forwardedProto === "http" || forwardedProto === "https") {
+    return forwardedProto === "https";
+  }
+
+  const standardizedForwardedProto = parseForwardedProto(headerStore.get("forwarded"));
+  if (standardizedForwardedProto) {
+    return standardizedForwardedProto === "https";
+  }
+
+  const cfVisitor = headerStore.get("cf-visitor");
+  if (cfVisitor?.includes('"scheme":"https"')) {
+    return true;
+  }
+  if (cfVisitor?.includes('"scheme":"http"')) {
+    return false;
+  }
+
+  const originLikeHeader = headerStore.get("origin") ?? headerStore.get("referer");
+  if (originLikeHeader) {
+    try {
+      return new URL(originLikeHeader).protocol === "https:";
+    } catch {
+    }
+  }
+
+  const host = extractHostname(headerStore.get("x-forwarded-host") ?? headerStore.get("host"));
+  if (isDirectHost(host)) {
+    return false;
+  }
+
+  return process.env.NODE_ENV === "production";
 }
 
 async function signPayload(payload: string, input?: {createIfMissing?: boolean}): Promise<string> {
@@ -177,7 +266,7 @@ async function setSessionCookie(session: AdminSession): Promise<void> {
   cookieStore.set(ADMIN_SESSION_COOKIE, await serializeSession(session), {
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure: await shouldUseSecureSessionCookie(),
     path: "/",
     maxAge: ADMIN_SESSION_MAX_AGE_SECONDS,
   });
