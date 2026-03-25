@@ -459,6 +459,22 @@ interface ResultBuilderParams {
   pingLatencyMs: number | null;
 }
 
+interface CheckWithAiSdkOptions {
+  abortSignal?: AbortSignal;
+  propagateAbort?: boolean;
+}
+
+function throwIfAbortShouldPropagate(
+  options: CheckWithAiSdkOptions | undefined,
+  fallback?: unknown
+): void {
+  if (!options?.propagateAbort || !options.abortSignal?.aborted) {
+    return;
+  }
+
+  throw (options.abortSignal.reason ?? fallback ?? new Error("当前检查已取消"));
+}
+
 /**
  * 构建检查结果对象
  *
@@ -507,8 +523,12 @@ function buildCheckResult(
  * - failed：请求失败、超时或回复为空
  * - error：请求过程中发生异常
  */
-export async function checkWithAiSdk(config: ProviderConfig): Promise<CheckResult> {
+export async function checkWithAiSdk(
+  config: ProviderConfig,
+  options?: CheckWithAiSdkOptions
+): Promise<CheckResult> {
   const controller = new AbortController();
+  let abortListenerCleanup: (() => void) | null = null;
   const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
   const startedAt = Date.now();
 
@@ -522,6 +542,24 @@ export async function checkWithAiSdk(config: ProviderConfig): Promise<CheckResul
     endpoint: displayEndpoint,
     pingLatencyMs: await pingPromise,
   });
+
+  if (options?.abortSignal) {
+    const externalSignal = options.abortSignal;
+    const forwardAbort = () => {
+      if (!controller.signal.aborted) {
+        controller.abort(externalSignal.reason);
+      }
+    };
+
+    if (externalSignal.aborted) {
+      forwardAbort();
+    } else {
+      externalSignal.addEventListener("abort", forwardAbort, {once: true});
+      abortListenerCleanup = () => {
+        externalSignal.removeEventListener("abort", forwardAbort);
+      };
+    }
+  }
 
   try {
     const { model, reasoningEffort } = createModel(config);
@@ -581,6 +619,8 @@ export async function checkWithAiSdk(config: ProviderConfig): Promise<CheckResul
 
     // 检查流处理过程中是否有错误
     if (streamError) {
+      throwIfAbortShouldPropagate(options, streamError);
+
       return buildCheckResult(
         params,
         "error",
@@ -594,6 +634,7 @@ export async function checkWithAiSdk(config: ProviderConfig): Promise<CheckResul
     if (!collectedResponse.trim()) {
       const finishReason = await result.finishReason.catch(() => undefined);
       if (controller.signal.aborted) {
+        throwIfAbortShouldPropagate(options, finishReason);
         return buildCheckResult(params, "failed", latencyMs, "请求超时");
       }
 
@@ -635,6 +676,8 @@ export async function checkWithAiSdk(config: ProviderConfig): Promise<CheckResul
 
     return buildCheckResult(params, status, latencyMs, message);
   } catch (error) {
+    throwIfAbortShouldPropagate(options, error);
+
     const params = await buildParams();
     return buildCheckResult(
       params,
@@ -645,5 +688,6 @@ export async function checkWithAiSdk(config: ProviderConfig): Promise<CheckResul
     );
   } finally {
     clearTimeout(timeout);
+    abortListenerCleanup?.();
   }
 }

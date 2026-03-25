@@ -25,6 +25,7 @@ const POLLER_FLUSH_BUFFER_MS = 30_000;
 
 let activeTickBudgetMs: number | null = null;
 let activeTickRunId = 0;
+let activeTickController: AbortController | null = null;
 
 function isFailureResult(result: CheckResult): boolean {
   return FAILURE_STATUSES.has(result.status);
@@ -146,6 +147,18 @@ function getTickBudgetMs(configCount: number): number {
   return batches * maxSingleConfigDurationMs + POLLER_FLUSH_BUFFER_MS;
 }
 
+function isTickCurrent(tickRunId: number, signal: AbortSignal): boolean {
+  return tickRunId === activeTickRunId && !signal.aborted;
+}
+
+function abortActiveTick(error: Error): void {
+  if (!activeTickController || activeTickController.signal.aborted) {
+    return;
+  }
+
+  activeTickController.abort(error);
+}
+
 function startCheckPoller(): void {
   if (isBuildPhase()) {
     return;
@@ -183,11 +196,14 @@ async function tick() {
     const lastStartedAt = getLastPingStartedAt();
     const duration = lastStartedAt ? Date.now() - lastStartedAt : null;
     if (duration !== null && activeTickBudgetMs !== null && duration > activeTickBudgetMs) {
+      const staleTickError = new Error("当前轮询已过期，终止旧一轮 provider 检查");
       console.error(
         `[check-cx] 检测到上一轮轮询卡住，已强制释放运行锁（elapsed=${duration}ms, budget=${activeTickBudgetMs}ms）`
       );
+      abortActiveTick(staleTickError);
       activeTickRunId += 1;
       activeTickBudgetMs = null;
+      activeTickController = null;
       globalThis.__checkCxPollerRunning = false;
     } else {
       console.log(
@@ -202,11 +218,17 @@ async function tick() {
   globalThis.__checkCxPollerRunning = true;
   activeTickRunId += 1;
   const tickRunId = activeTickRunId;
+  const tickController = new AbortController();
   activeTickBudgetMs = POLLER_STARTUP_BUDGET_MS;
+  activeTickController = tickController;
 
   setLastPingStartedAt(Date.now());
   try {
     const allConfigs = await loadProviderConfigsFromDB();
+    if (!isTickCurrent(tickRunId, tickController.signal)) {
+      return;
+    }
+
     // 过滤掉维护中的配置
     const configs = allConfigs.filter((cfg) => !cfg.is_maintenance);
     activeTickBudgetMs = getTickBudgetMs(configs.length);
@@ -215,8 +237,18 @@ async function tick() {
       return;
     }
 
-    const results = await runProviderChecks(configs);
+    const results = await runProviderChecks(configs, {signal: tickController.signal});
+    if (!isTickCurrent(tickRunId, tickController.signal)) {
+      console.warn("[check-cx] 已丢弃过期轮询结果，避免写入重复历史");
+      return;
+    }
+
     await historySnapshotStore.append(results);
+    if (!isTickCurrent(tickRunId, tickController.signal)) {
+      console.warn("[check-cx] 旧轮询已在写入后过期，跳过后续缓存刷新");
+      return;
+    }
+
     clearPingCache();
     invalidateDashboardCache();
     console.log(
@@ -224,10 +256,20 @@ async function tick() {
     );
     logFailedResultsByGroup(results);
   } catch (error) {
+    if (tickController.signal.aborted) {
+      const message =
+        tickController.signal.reason instanceof Error
+          ? tickController.signal.reason.message
+          : "当前轮询已取消";
+      console.warn(`[check-cx] 轮询已取消：${message}`);
+      return;
+    }
+
     console.error("[check-cx] 轮询检测失败", error);
   } finally {
     if (tickRunId === activeTickRunId) {
       activeTickBudgetMs = null;
+      activeTickController = null;
       globalThis.__checkCxPollerRunning = false;
     }
   }

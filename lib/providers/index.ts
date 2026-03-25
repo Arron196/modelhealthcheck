@@ -12,27 +12,100 @@ import { getCheckConcurrency } from "../core/polling-config";
 const MAX_REQUEST_ABORT_RETRIES = 2;
 export const PROVIDER_CHECK_ATTEMPT_TIMEOUT_MS = 60_000;
 export const PROVIDER_CHECK_MAX_ATTEMPTS = MAX_REQUEST_ABORT_RETRIES + 1;
+const ABORT_SETTLE_GRACE_MS = 2_000;
 const TRANSIENT_FAILURE_PATTERN =
   /request was aborted\.?|timeout|请求超时|No output generated|回复为空|server_error|temporarily unavailable|overloaded/i;
 
+interface ProviderCheckExecutionOptions {
+  signal?: AbortSignal;
+}
+
+function normalizeAbortError(reason: unknown, fallbackMessage: string): Error {
+  if (reason instanceof Error) {
+    return reason;
+  }
+
+  if (typeof reason === "string" && reason.trim()) {
+    return new Error(reason);
+  }
+
+  return new Error(fallbackMessage);
+}
+
+function throwIfAborted(signal: AbortSignal | undefined, fallbackMessage: string): void {
+  if (!signal?.aborted) {
+    return;
+  }
+
+  throw normalizeAbortError(signal.reason, fallbackMessage);
+}
+
 async function runWithHardTimeout<T>(
-  operation: () => Promise<T>,
+  operation: (signal: AbortSignal) => Promise<T>,
   timeoutMs: number,
-  label: string
+  label: string,
+  options?: ProviderCheckExecutionOptions
 ): Promise<T> {
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    timeoutId = setTimeout(() => {
-      reject(new Error(`${label} 请求超时（>${timeoutMs}ms）`));
-    }, timeoutMs);
+  const parentSignal = options?.signal;
+  const localController = new AbortController();
+  let abortFallbackId: ReturnType<typeof setTimeout> | undefined;
+  let removeParentAbortListener: (() => void) | null = null;
+  let scheduleAbortFallback: ((error: Error) => void) | null = null;
+  const timeoutError = new Error(`${label} 请求超时（>${timeoutMs}ms）`);
+
+  const abortFallbackPromise = new Promise<never>((_, reject) => {
+    let scheduled = false;
+    scheduleAbortFallback = (error) => {
+      if (scheduled) {
+        return;
+      }
+
+      scheduled = true;
+      abortFallbackId = setTimeout(() => reject(error), ABORT_SETTLE_GRACE_MS);
+    };
   });
 
-  try {
-    return await Promise.race([operation(), timeoutPromise]);
-  } finally {
-    if (timeoutId) {
-      clearTimeout(timeoutId);
+  const abortOperation = (reason: unknown, fallbackMessage: string) => {
+    const abortError = normalizeAbortError(reason, fallbackMessage);
+    if (!localController.signal.aborted) {
+      localController.abort(abortError);
     }
+    scheduleAbortFallback?.(abortError);
+    return abortError;
+  };
+
+  throwIfAborted(parentSignal, `${label} 已取消`);
+
+  if (parentSignal) {
+    const handleParentAbort = () => {
+      abortOperation(parentSignal.reason, `${label} 已取消`);
+    };
+
+    parentSignal.addEventListener("abort", handleParentAbort, {once: true});
+    removeParentAbortListener = () => {
+      parentSignal.removeEventListener("abort", handleParentAbort);
+    };
+  }
+
+  const operationPromise = operation(localController.signal);
+  const timeoutId = setTimeout(() => {
+    abortOperation(timeoutError, timeoutError.message);
+  }, timeoutMs);
+
+  try {
+    return await Promise.race([operationPromise, abortFallbackPromise]);
+  } catch (error) {
+    if (localController.signal.aborted) {
+      throw normalizeAbortError(localController.signal.reason ?? error, `${label} 已取消`);
+    }
+
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+    if (abortFallbackId) {
+      clearTimeout(abortFallbackId);
+    }
+    removeParentAbortListener?.();
   }
 }
 
@@ -44,13 +117,23 @@ function shouldRetryTransientFailure(...messages: Array<string | undefined>): bo
   return TRANSIENT_FAILURE_PATTERN.test(combined);
 }
 
-async function checkWithRetry(config: ProviderConfig): Promise<CheckResult> {
+async function checkWithRetry(
+  config: ProviderConfig,
+  options?: ProviderCheckExecutionOptions
+): Promise<CheckResult> {
   for (let attempt = 0; attempt <= MAX_REQUEST_ABORT_RETRIES; attempt += 1) {
+    throwIfAborted(options?.signal, `${config.name} 检测已取消`);
+
     try {
       const result = await runWithHardTimeout(
-        () => checkWithAiSdk(config),
+        (attemptSignal) =>
+          checkWithAiSdk(config, {
+            abortSignal: attemptSignal,
+            propagateAbort: true,
+          }),
         PROVIDER_CHECK_ATTEMPT_TIMEOUT_MS,
-        `${config.name} 第 ${attempt + 1} 次检测`
+        `${config.name} 第 ${attempt + 1} 次检测`,
+        options
       );
       if (
         (result.status === "failed" || result.status === "error") &&
@@ -66,6 +149,10 @@ async function checkWithRetry(config: ProviderConfig): Promise<CheckResult> {
       }
       return result;
     } catch (error) {
+      if (options?.signal?.aborted) {
+        throw normalizeAbortError(options.signal.reason ?? error, `${config.name} 检测已取消`);
+      }
+
       const message = getErrorMessage(error);
       if (
         shouldRetryTransientFailure(message) &&
@@ -107,7 +194,8 @@ async function checkWithRetry(config: ProviderConfig): Promise<CheckResult> {
  * @returns 检查结果列表,按名称排序
  */
 export async function runProviderChecks(
-  configs: ProviderConfig[]
+  configs: ProviderConfig[],
+  options?: ProviderCheckExecutionOptions
 ): Promise<CheckResult[]> {
   if (configs.length === 0) {
     return [];
@@ -115,7 +203,7 @@ export async function runProviderChecks(
 
   const limit = pLimit(getCheckConcurrency());
   const results = await Promise.all(
-    configs.map((config) => limit(() => checkWithRetry(config)))
+    configs.map((config) => limit(() => checkWithRetry(config, options)))
   );
 
   return results.sort((a, b) => a.name.localeCompare(b.name));
