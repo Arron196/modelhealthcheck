@@ -23,7 +23,7 @@ const CornerPlus = ({ className }: { className?: string }) => (
 
 function CardSkeleton() {
   return (
-    <div className="flex flex-col gap-4 rounded-3xl border border-border/40 bg-background/40 p-5">
+    <div className="flex flex-col gap-4 rounded-3xl border border-border/40 bg-background/40 p-5 shadow-sm">
       <div className="flex items-center justify-between">
         <SkeletonBlock className="h-4 w-32" />
         <SkeletonBlock className="h-5 w-12 rounded-full" />
@@ -41,7 +41,7 @@ function CardSkeleton() {
 
 function ProviderCardSkeleton() {
   return (
-    <div className="relative flex flex-col overflow-hidden rounded-2xl border border-border/40 bg-background/40">
+    <div className="relative flex flex-col overflow-hidden rounded-2xl border border-border/40 bg-background/40 shadow-sm">
       <div className="p-4 sm:p-5">
         <div className="mb-4 flex items-start justify-between">
           <div className="flex min-w-0 flex-1 items-center gap-3">

@@ -1,20 +1,18 @@
 import Link from "next/link";
 
-import {
-  AdminField,
-  AdminInput,
-  AdminPageIntro,
-  AdminPanel,
-  AdminStatCard,
-  AdminStatusBanner,
-} from "@/components/admin/admin-primitives";
+import {AdminField, AdminInput, AdminStatusBanner} from "@/components/admin/admin-primitives";
 import {TurnstileWidget} from "@/components/admin/turnstile-widget";
 import {Button} from "@/components/ui/button";
 import {bootstrapAdminAction, loginAdminAction} from "@/app/admin/actions";
-import {ensureLoggedOutForLoginPage, getTurnstileSiteKey, hasAdminUsers, isTurnstileEnabled} from "@/lib/admin/auth";
+import {
+  ensureLoggedOutForLoginPage,
+  getTurnstileSiteKey,
+  hasAdminUsers,
+  isTurnstileEnabled,
+} from "@/lib/admin/auth";
+import {getAdminFeedback} from "@/lib/admin/view";
 import {loadManagedStorageSettings} from "@/lib/storage/bootstrap-store";
 import {resolveDatabaseBackend} from "@/lib/storage/resolver";
-import {getAdminFeedback} from "@/lib/admin/view";
 
 export const dynamic = "force-dynamic";
 
@@ -40,52 +38,71 @@ export default async function AdminLoginPage({searchParams}: AdminLoginPageProps
     availabilityError =
       error instanceof Error && error.message.trim()
         ? error.message
-        : "当前无法连接管理员账户存储，请确认所选数据库后端已正确配置。";
+        : "当前无法连接管理员账户存储，请确认数据库后端已正确配置。";
   }
 
   return (
-    <div className="min-h-screen py-8 md:py-16">
-      <main className="mx-auto flex w-full max-w-[1600px] flex-col gap-6 px-3 sm:gap-8 sm:px-6 lg:px-12">
-        <Link
-          href="/"
-          className="inline-flex w-fit items-center gap-1.5 rounded-full border border-border/40 bg-background/60 px-4 py-1.5 text-sm font-medium text-muted-foreground shadow-sm backdrop-blur-sm transition hover:border-border/80 hover:text-foreground"
-        >
-          返回首页
-        </Link>
+    <div className="relative min-h-screen bg-background text-foreground flex flex-col items-center justify-center p-4 selection:bg-primary/20">
+      {/* Background Ambience */}
+      <div className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
+        <div className="absolute left-[20%] top-[20%] h-96 w-96 rounded-full bg-primary/10 blur-[120px] mix-blend-screen" />
+        <div className="absolute bottom-[20%] right-[20%] h-96 w-96 rounded-full bg-blue-500/10 blur-[120px] mix-blend-screen" />
+      </div>
 
-          <AdminPageIntro
-            eyebrow={adminExists ? "Admin / Login" : "Admin / Bootstrap"}
-            title={adminExists ? "管理员登录" : "初始化管理员账户"}
-            description={
-              adminExists
-                ? "后台已启用基础账号密码登录。完成验证后即可进入控制台，继续使用与主站一致的界面风格管理配置。"
-                : "这是后台第一次启用。先创建首个管理员账户；创建成功后会直接进入存储初始化步骤，你可以保留 SQLite，也可以继续配置 PostgreSQL / Supabase。"
-            }
-          />
-
-        {feedback ? <AdminStatusBanner type={feedback.type} message={feedback.message} /> : null}
-
-        <div className="grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
-          <AdminPanel
-            title={adminExists ? "登录后台" : "创建首个管理员"}
-            description={
-              adminExists
-                ? "请输入管理员用户名和密码。"
-                : "首次创建完成后会直接跳到 `/admin/storage`，继续完成存储向导；后续访问 `/admin` 会直接进入登录流程。"
-            }
+      <div className="w-full max-w-md space-y-8 relative">
+        {/* Header Section */}
+        <div className="text-center space-y-4">
+          <Link
+            href="/"
+            className="inline-flex items-center justify-center rounded-full bg-muted/40 px-4 py-1.5 text-sm font-medium text-muted-foreground backdrop-blur-md transition-all hover:bg-muted/60 hover:text-foreground active:scale-[0.97]"
           >
+            返回公开页面
+          </Link>
+          <div className="space-y-2">
+            <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl bg-gradient-to-br from-foreground to-foreground/70 bg-clip-text text-transparent">
+              {adminExists ? "验证管理员身份" : "初始化控制面板"}
+            </h1>
+            <p className="text-sm text-muted-foreground/80">
+              {adminExists ? "继续操作前请先登录。" : "没有检测到可用凭证，请创建初始管理员账号。"}
+            </p>
+          </div>
+        </div>
+
+        {/* Info Pills */}
+        <div className="flex items-center justify-center gap-3 text-xs font-medium text-muted-foreground">
+          <div className="flex items-center gap-1.5 rounded-md border border-border/40 bg-background/50 px-2.5 py-1 backdrop-blur-sm">
+            <div className="h-1.5 w-1.5 rounded-full bg-primary" />
+            {backend.provider.toUpperCase()}
+          </div>
+          {turnstileEnabled && (
+            <div className="flex items-center gap-1.5 rounded-md border border-border/40 bg-background/50 px-2.5 py-1 backdrop-blur-sm">
+              <div className="h-1.5 w-1.5 rounded-full bg-green-500" />
+              TURNSTILE
+            </div>
+          )}
+        </div>
+
+        {/* Main Card */}
+        <div className="overflow-hidden rounded-2xl border border-border/40 bg-background/40 shadow-2xl backdrop-blur-xl">
+          <div className="p-6 sm:p-8">
+            {feedback ? (
+              <div className="mb-6">
+                <AdminStatusBanner type={feedback.type} message={feedback.message} />
+              </div>
+            ) : null}
+
             {availabilityError ? (
-              <div className="rounded-[1.5rem] border border-dashed border-border/50 px-4 py-6 text-sm leading-7 text-muted-foreground">
+              <div className="rounded-xl border border-destructive/20 bg-destructive/10 p-4 text-sm text-destructive">
                 {availabilityError}
               </div>
             ) : (
-              <form action={adminExists ? loginAdminAction : bootstrapAdminAction} className="space-y-4">
-                <AdminField label="用户名" description="推荐使用统一的小写标识，例如 admin.core。">
-                  <AdminInput name="username" placeholder="admin.core" required />
+              <form action={adminExists ? loginAdminAction : bootstrapAdminAction} className="space-y-5">
+                <AdminField label="用户名">
+                  <AdminInput name="username" placeholder="admin" required className="bg-background/50 focus:bg-background" />
                 </AdminField>
 
                 <AdminField label="密码">
-                  <AdminInput name="password" type="password" placeholder="至少 8 位" required />
+                  <AdminInput name="password" type="password" placeholder="输入密码" required className="bg-background/50 focus:bg-background" />
                 </AdminField>
 
                 {adminExists ? null : (
@@ -95,71 +112,35 @@ export default async function AdminLoginPage({searchParams}: AdminLoginPageProps
                       type="password"
                       placeholder="再次输入密码"
                       required
+                      className="bg-background/50 focus:bg-background"
                     />
                   </AdminField>
                 )}
 
-                <TurnstileWidget
-                  action={adminExists ? "login" : "admin_bootstrap"}
-                  siteKey={turnstileSiteKey}
-                />
+                <div className="mt-2">
+                  <TurnstileWidget
+                    action={adminExists ? "login" : "admin_bootstrap"}
+                    siteKey={turnstileSiteKey}
+                  />
+                </div>
 
-                <Button type="submit" className="w-full rounded-full">
-                  {adminExists ? "登录后台" : "创建管理员并进入后台"}
+                <Button type="submit" className="w-full h-11 text-base font-medium shadow-lg shadow-primary/20 transition-all hover:shadow-primary/30">
+                  {adminExists ? "登 录" : "初 始 化"}
                 </Button>
               </form>
             )}
-          </AdminPanel>
-
-          <AdminPanel
-            title={adminExists ? "安全说明" : "初始化向导说明"}
-            description={
-              adminExists
-                ? "保持最小实现，但把关键安全边界补齐。"
-                : "当前首轮初始化支持先落在 SQLite，再受控切换到 PostgreSQL 或 Supabase。"
-            }
-          >
-            <div className="space-y-4 text-sm leading-7 text-muted-foreground">
-              {!adminExists ? (
-                <div className="grid gap-4 md:grid-cols-3">
-                  <AdminStatCard
-                    label="当前启动后端"
-                    value={backend.provider}
-                    helper={backend.reason}
-                  />
-                  <AdminStatCard
-                    label="托管 Supabase"
-                    value={managedSettings.hasSupabaseAdminCredentials ? "READY" : "OPTIONAL"}
-                    helper={managedSettings.supabaseProjectHost ?? "尚未保存项目地址"}
-                  />
-                  <AdminStatCard
-                    label="SQLite 回退"
-                    value={backend.provider === "sqlite" ? "ACTIVE" : "IDLE"}
-                    helper={backend.sqliteFilePath}
-                  />
-                </div>
-              ) : null}
-
-              <div className="rounded-[1.5rem] border border-border/40 bg-background/70 px-4 py-4 shadow-sm">
-                会话使用服务端签名 cookie 保存，密码仅以哈希形式存储在数据库中。
-              </div>
-              {!adminExists ? (
-                <div className="rounded-[1.5rem] border border-border/40 bg-background/70 px-4 py-4 shadow-sm">
-                  推荐流程是：先创建管理员 → 在 `/admin/storage` 决定是否继续使用 SQLite → 若要接入 PostgreSQL / Supabase，再保存草稿、导入当前数据（含历史记录）并执行启用。
-                </div>
-              ) : null}
-              <div className="rounded-[1.5rem] border border-border/40 bg-background/70 px-4 py-4 shadow-sm">
-                检测配置、模板、分组和通知的写操作仍然全部走服务端 action，不会把敏感密钥回传到客户端。
-              </div>
-              <div className="rounded-[1.5rem] border border-border/40 bg-background/70 px-4 py-4 shadow-sm">
-                {turnstileEnabled
-                  ? "当前环境已启用 Cloudflare Turnstile，登录与首次初始化都需要通过挑战验证。"
-                  : "当前环境未配置 Turnstile key，登录流程仍可使用；补齐站点 key 与 secret 后会自动启用人机验证。"}
-              </div>
-            </div>
-          </AdminPanel>
+          </div>
         </div>
-      </main>
+
+        {/* Footer Info */}
+        <div className="text-center text-xs text-muted-foreground/60">
+          {managedSettings.hasSupabaseAdminCredentials
+            ? "已接入托管服务"
+            : managedSettings.supabaseProjectHost
+              ? `项目地址 ${managedSettings.supabaseProjectHost}`
+              : "本地运行环境"}
+        </div>
+      </div>
     </div>
   );
 }

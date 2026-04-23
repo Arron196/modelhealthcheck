@@ -27,23 +27,22 @@ export default async function AdminTemplatesPage({searchParams}: AdminTemplatesP
   return (
     <div className="space-y-6">
       <AdminPageIntro
-        eyebrow="Admin / Templates"
-        title="请求模板管理"
-        description="直接维护 `check_request_templates`，把通用 header / metadata 沉淀成模板，再挂到具体 provider 配置上。"
+        title="请求模板"
+        description="统一管理可复用的请求内容。"
       />
 
       {feedback ? <AdminStatusBanner type={feedback.type} message={feedback.message} /> : null}
 
       <div className="grid gap-6 xl:grid-cols-[0.9fr_1.4fr]">
-        <AdminPanel title="新增模板" description="适合放置可复用的 provider 级请求头或 metadata。">
+        <AdminPanel title="新增模板" description="创建一个可复用模板。">
           <form action={upsertTemplateAction} className="space-y-4">
             <input type="hidden" name="returnTo" value="/admin/templates" />
 
             <AdminField label="模板名称">
-              <AdminInput name="name" placeholder="OpenAI Default Header" required />
+              <AdminInput name="name" placeholder="默认请求头" required />
             </AdminField>
 
-            <AdminField label="Provider 类型">
+            <AdminField label="服务类型">
               <AdminSelect name="type" defaultValue="openai" required>
                 {ADMIN_PROVIDER_TYPES.map((item) => (
                   <option key={item} value={item}>
@@ -57,7 +56,7 @@ export default async function AdminTemplatesPage({searchParams}: AdminTemplatesP
               <AdminTextarea name="request_header" placeholder='{"x-foo": "bar"}' />
             </AdminField>
 
-            <AdminField label="元数据(JSON)">
+            <AdminField label="附加参数(JSON)">
               <AdminTextarea name="metadata" placeholder='{"team": "core"}' />
             </AdminField>
 
@@ -67,7 +66,7 @@ export default async function AdminTemplatesPage({searchParams}: AdminTemplatesP
           </form>
         </AdminPanel>
 
-        <AdminPanel title="现有模板" description="更改模板后，关联配置会在下一次读取时自动合并到请求参数中。">
+        <AdminPanel title="现有模板" description="编辑已有模板。">
           <div className="space-y-4">
             {templates.length === 0 ? (
               <div className="rounded-[1.5rem] border border-dashed border-border/50 px-4 py-6 text-sm text-muted-foreground">
@@ -114,7 +113,7 @@ export default async function AdminTemplatesPage({searchParams}: AdminTemplatesP
                         <AdminInput name="name" defaultValue={template.name} required />
                       </AdminField>
 
-                      <AdminField label="Provider 类型">
+                      <AdminField label="服务类型">
                         <AdminSelect name="type" defaultValue={template.type} required>
                           {ADMIN_PROVIDER_TYPES.map((item) => (
                             <option key={item} value={item}>
@@ -133,7 +132,7 @@ export default async function AdminTemplatesPage({searchParams}: AdminTemplatesP
                         />
                       </AdminField>
 
-                      <AdminField label="元数据(JSON)">
+                      <AdminField label="附加参数(JSON)">
                         <AdminTextarea
                           name="metadata"
                           defaultValue={formatJson(template.metadata)}

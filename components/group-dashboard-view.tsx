@@ -45,7 +45,6 @@ const PERIOD_OPTIONS: Array<{ value: AvailabilityPeriod; label: string }> = [
   { value: "30d", label: "30 天" },
 ];
 
-/** Tech-style decorative corner plus marker */
 const CornerPlus = ({ className }: { className?: string }) => (
   <svg 
     viewBox="0 0 24 24" 
@@ -59,11 +58,6 @@ const CornerPlus = ({ className }: { className?: string }) => (
   </svg>
 );
 
-/**
- * 分组 Dashboard 视图
- * - 展示单个分组内的所有 Provider 卡片
- * - 支持客户端定时刷新
- */
 export function GroupDashboardView({
   groupName,
   initialData,
@@ -230,7 +224,14 @@ export function GroupDashboardView({
   }, [providerTimelines]);
 
   return (
-    <div className="relative">
+    <div className="relative isolate">
+      <div className="pointer-events-none fixed inset-x-0 -top-40 -z-10 transform-gpu overflow-hidden blur-3xl sm:-top-80">
+        <div className="relative left-[calc(50%-11rem)] aspect-[1155/678] w-[36.125rem] -translate-x-1/2 rotate-[30deg] bg-gradient-to-tr from-primary/30 to-primary/10 opacity-20 sm:left-[calc(50%-30rem)] sm:w-[72.1875rem]" />
+      </div>
+      <div className="pointer-events-none fixed inset-x-0 top-[calc(100%-13rem)] -z-10 transform-gpu overflow-hidden blur-3xl sm:top-[calc(100%-30rem)]">
+        <div className="relative left-[calc(50%+3rem)] aspect-[1155/678] w-[36.125rem] -translate-x-1/2 bg-gradient-to-tr from-primary/20 to-primary/5 opacity-20 sm:left-[calc(50%+36rem)] sm:w-[72.1875rem]" />
+      </div>
+
       <CornerPlus className="fixed left-4 top-4 h-6 w-6 text-border md:left-8 md:top-8" />
       <CornerPlus className="fixed right-4 top-4 h-6 w-6 text-border md:right-8 md:top-8" />
       <CornerPlus className="fixed bottom-4 left-4 h-6 w-6 text-border md:bottom-8 md:left-8" />
@@ -243,12 +244,12 @@ export function GroupDashboardView({
               <Activity className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
             </div>
             <span className="text-xs font-bold uppercase tracking-widest text-muted-foreground sm:text-sm">
-              Group View
+              分组页
             </span>
           </div>
           
           <div className="flex flex-wrap items-center gap-3">
-            <h1 className="max-w-2xl text-3xl font-extrabold leading-tight tracking-tight sm:text-5xl md:text-6xl">
+            <h1 className="max-w-2xl text-4xl font-extrabold leading-tight tracking-tight sm:text-6xl md:text-7xl bg-gradient-to-br from-foreground to-foreground/60 bg-clip-text text-transparent">
               {displayName}
             </h1>
             <GroupTags tags={data.tags} />
@@ -257,6 +258,7 @@ export function GroupDashboardView({
                 href={data.websiteUrl}
                 target="_blank"
                 rel="noopener noreferrer"
+                aria-label={`打开 ${displayName} 官网`}
                 className="flex items-center justify-center rounded-full bg-muted/50 p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
               >
                 <ExternalLink className="h-6 w-6" />
@@ -328,13 +330,12 @@ export function GroupDashboardView({
              </div>
            </div>
 
-           {/* Status Pill */}
            <div className="flex items-center gap-2 rounded-full border border-border/60 bg-background/50 px-4 py-1.5 backdrop-blur-sm">
               <span className="relative flex h-2.5 w-2.5">
                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-500 opacity-75" />
                 <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-green-500" />
               </span>
-              <span className="text-xs font-semibold uppercase tracking-wider">Operational</span>
+              <span className="text-xs font-semibold uppercase tracking-wider">在线</span>
            </div>
 
            {lastUpdated && (

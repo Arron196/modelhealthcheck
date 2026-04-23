@@ -34,9 +34,8 @@ export default async function AdminSettingsPage({searchParams}: AdminSettingsPag
   return (
     <div className="space-y-6">
       <AdminPageIntro
-        eyebrow="Admin / Settings"
         title="站点设置"
-        description="把站点名称、浏览器图标、首页 Hero 品牌文案、footer 品牌名和后台壳子标题统一收进一处。后续你想改品牌呈现，不需要再回到代码里改常量。"
+        description="统一调整站点名称、图标和页面文案。"
       />
 
       {feedback ? <AdminStatusBanner type={feedback.type} message={feedback.message} /> : null}
@@ -46,7 +45,7 @@ export default async function AdminSettingsPage({searchParams}: AdminSettingsPag
         <div className="space-y-6">
           <AdminPanel
             title="上传站点图标"
-            description="直接上传图标文件即可，系统会把文件保存到本地持久化目录，并自动生成浏览器标签页 / 侧栏图标所需地址。"
+            description="上传后会直接替换当前图标。"
           >
             <div className="space-y-4">
               <div className="flex items-start gap-4 rounded-[1.5rem] border border-border/40 bg-background/70 p-4 shadow-sm">
@@ -93,7 +92,7 @@ export default async function AdminSettingsPage({searchParams}: AdminSettingsPag
 
           <AdminPanel
             title="编辑全局品牌设置"
-            description="这些设置会影响浏览器标题、首页主视觉、footer，以及后台壳子的品牌呈现。图标上传在上方单独管理。"
+            description="这些内容会影响首页和后台显示。"
           >
             <form action={upsertSiteSettingsAction} className="space-y-4">
               <input type="hidden" name="returnTo" value="/admin/settings" />
@@ -103,11 +102,11 @@ export default async function AdminSettingsPage({searchParams}: AdminSettingsPag
                   <AdminInput name="site_name" defaultValue={settings.siteName} required />
                 </AdminField>
 
-                <AdminField label="Footer 品牌名" description="用于首页底部版权区域。">
+                <AdminField label="页脚品牌名" description="用于首页底部。">
                   <AdminInput name="footer_brand" defaultValue={settings.footerBrand} required />
                 </AdminField>
 
-                <AdminField label="Hero 徽标文案" description="首页标题上方的小型胶囊标签。">
+                <AdminField label="首页徽标文案" description="显示在首页标题上方。">
                   <AdminInput name="hero_badge" defaultValue={settings.heroBadge} required />
                 </AdminField>
 
@@ -119,7 +118,7 @@ export default async function AdminSettingsPage({searchParams}: AdminSettingsPag
                   />
                 </AdminField>
 
-                <AdminField label="Hero 标题主行">
+                <AdminField label="首页标题主行">
                   <AdminInput
                     name="hero_title_primary"
                     defaultValue={settings.heroTitlePrimary}
@@ -127,7 +126,7 @@ export default async function AdminSettingsPage({searchParams}: AdminSettingsPag
                   />
                 </AdminField>
 
-                <AdminField label="Hero 标题副行">
+                <AdminField label="首页标题副行">
                   <AdminInput
                     name="hero_title_secondary"
                     defaultValue={settings.heroTitleSecondary}
@@ -136,7 +135,7 @@ export default async function AdminSettingsPage({searchParams}: AdminSettingsPag
                 </AdminField>
               </div>
 
-              <AdminField label="站点描述" description="用于 metadata description 与分组页衍生描述。">
+              <AdminField label="站点描述" description="用于浏览器摘要和分组页的衍生描述。">
                 <AdminTextarea
                   name="site_description"
                   defaultValue={settings.siteDescription}
@@ -144,7 +143,7 @@ export default async function AdminSettingsPage({searchParams}: AdminSettingsPag
                 />
               </AdminField>
 
-              <AdminField label="首页 Hero 描述" description="支持换行，适合一中一英两行品牌说明。">
+              <AdminField label="首页描述" description="支持换行。">
                 <AdminTextarea
                   name="hero_description"
                   defaultValue={settings.heroDescription}
@@ -169,13 +168,13 @@ export default async function AdminSettingsPage({searchParams}: AdminSettingsPag
 
         <AdminPanel
           title="当前效果预览"
-          description="这里不是像素级完整预览，而是把几个最关键的品牌位集中出来，方便你保存前快速核对。"
+          description="保存前先看一眼主要效果。"
           trailing={<Sparkles className="h-4 w-4 text-muted-foreground" />}
         >
           <div className="space-y-4">
             <div className="rounded-[1.75rem] border border-border/40 bg-background/70 p-5 shadow-sm">
               <div className="text-xs font-medium uppercase tracking-[0.3em] text-muted-foreground">
-                Browser Title
+                浏览器标题
               </div>
               <div className="mt-3 flex items-center gap-3 text-2xl font-semibold tracking-[-0.05em] text-foreground">
                 <div
@@ -206,7 +205,7 @@ export default async function AdminSettingsPage({searchParams}: AdminSettingsPag
 
             <div className="rounded-[1.75rem] border border-border/40 bg-background/70 p-5 shadow-sm">
               <div className="text-xs font-medium uppercase tracking-[0.3em] text-muted-foreground">
-                Admin Shell
+                后台标题
               </div>
               <div className="mt-3 text-xl font-semibold tracking-[-0.04em] text-foreground">
                 {settings.adminConsoleTitle}

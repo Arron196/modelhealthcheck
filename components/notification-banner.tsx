@@ -19,6 +19,8 @@ export function NotificationBanner() {
         if (response.ok) {
           const data = await response.json();
           setNotifications(data);
+          setCurrentIndex(0);
+          setVisible(true);
         }
       } catch (error) {
         console.error("Failed to fetch notifications:", error);
@@ -72,7 +74,7 @@ export function NotificationBanner() {
           className="ml-2 rounded-full p-1 opacity-70 hover:bg-black/5 hover:opacity-100 dark:hover:bg-white/10"
         >
           <X className="h-4 w-4" />
-          <span className="sr-only">Dismiss</span>
+          <span className="sr-only">关闭</span>
         </button>
       </div>
     </div>

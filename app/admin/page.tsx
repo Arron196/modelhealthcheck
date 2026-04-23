@@ -1,7 +1,7 @@
 import {ArrowRight, BellRing, Boxes, Database, FolderTree, HardDrive, Layers3, Settings2} from "lucide-react";
 import Link from "next/link";
 
-import {AdminActionLink, AdminPageIntro, AdminPanel, AdminStatCard} from "@/components/admin/admin-primitives";
+import {AdminPanel, AdminStatCard} from "@/components/admin/admin-primitives";
 import {requireAdminSession} from "@/lib/admin/auth";
 import {loadAdminManagementData} from "@/lib/admin/data";
 import {formatAdminTimestamp, getStatusToneClass} from "@/lib/admin/view";
@@ -13,43 +13,43 @@ const SECTION_LINKS = [
   {
     href: "/admin/configs",
     label: "检测配置",
-    summary: "管理 provider、模型、接口地址、分组和运行开关。",
+    summary: "配置、模型、地址、开关。",
     icon: Boxes,
   },
   {
     href: "/admin/templates",
     label: "请求模板",
-    summary: "复用请求头和 metadata，减少配置散落。",
+    summary: "请求头和附加参数。",
     icon: Layers3,
   },
   {
     href: "/admin/groups",
     label: "分组信息",
-    summary: "统一维护分组官网链接与标签展示。",
+    summary: "站点链接与标签。",
     icon: FolderTree,
   },
   {
     href: "/admin/notifications",
     label: "系统通知",
-    summary: "控制首页横幅公告的文案和显示状态。",
+    summary: "横幅文案和状态。",
     icon: BellRing,
   },
   {
     href: "/admin/storage",
     label: "存储诊断",
-    summary: "管理 PostgreSQL / Supabase 主备拓扑，并查看当前后端解析结果与控制面仓库健康状态。",
+    summary: "后端状态和健康信息。",
     icon: HardDrive,
   },
   {
     href: "/admin/supabase",
-    label: "Supabase 专诊",
-    summary: "当实际后端为 Supabase 时，查看更细的环境、关系与自动修复信息。",
+    label: "Supabase 检查",
+    summary: "Supabase 环境和修复信息。",
     icon: Database,
   },
   {
     href: "/admin/settings",
     label: "站点设置",
-    summary: "自定义站点名称、首页主视觉文案、footer 与后台品牌标题。",
+    summary: "名称、文案和标题。",
     icon: Settings2,
   },
 ] as const;
@@ -60,61 +60,63 @@ export default async function AdminOverviewPage() {
 
   return (
     <div className="space-y-6">
-      <AdminPageIntro
-        eyebrow="Admin / Overview"
-        title="后台管理控制台"
-        description="这里不是另起一套后台风格，而是沿用主站的圆角、玻璃感和科技标记语言，把运行配置、模板、分组和公告放进一个统一维护面板。"
-        actions={<AdminActionLink href="/admin/storage">进入诊断工具</AdminActionLink>}
-      />
+      <section className="space-y-2 text-center">
+        <h1 className="text-3xl font-semibold tracking-[-0.05em] text-foreground sm:text-4xl">
+          总览
+        </h1>
+        <p className="mx-auto max-w-2xl text-sm leading-6 text-muted-foreground sm:text-base">
+          查看状态、数量和入口。
+        </p>
+      </section>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         <AdminStatCard
           label="检测配置"
           value={overview.configCount}
-          helper={`已启用 ${overview.enabledConfigCount} 条，维护中 ${overview.maintenanceCount} 条`}
+          helper={`启用 ${overview.enabledConfigCount} 条，维护 ${overview.maintenanceCount} 条`}
         />
         <AdminStatCard
           label="请求模板"
           value={overview.templateCount}
-          helper="为配置复用请求头与元数据"
+          helper="复用请求头和附加参数"
         />
         <AdminStatCard
           label="分组信息"
           value={overview.groupCount}
-          helper="用于首页/分组页展示站点链接与标签"
+          helper="首页和分组页使用"
         />
         <AdminStatCard
           label="活跃通知"
           value={overview.activeNotificationCount}
-          helper="控制首页通知横幅的展示数量"
+          helper="首页横幅数量"
         />
         <AdminStatCard
           label="最近巡检"
           value={formatAdminTimestamp(overview.lastCheckedAt)}
-          helper="读取当前 dashboard 聚合快照"
+          helper="最近更新时间"
         />
         <AdminStatCard
           label="状态维度"
           value={overview.statusBreakdown.length}
-          helper="按最新状态聚合当前 provider 运行态"
+          helper="按状态汇总"
         />
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[1.2fr_1fr]">
         <AdminPanel
-          title="最近运行状态"
-          description="从现有 dashboard 数据聚合直接读取最近检查结果，方便在改配置前先判断当前运行态。"
+          title="状态"
+          description="最近一次检查结果。"
         >
           <div className="space-y-3">
             {overview.latestStatuses.length === 0 ? (
               <div className="rounded-[1.5rem] border border-dashed border-border/50 px-4 py-6 text-sm text-muted-foreground">
-                当前还没有可展示的巡检快照。
+                暂无记录。
               </div>
             ) : (
               overview.latestStatuses.map((item) => (
                 <div
                   key={item.id}
-                  className="flex flex-col gap-3 rounded-[1.5rem] border border-border/40 bg-background/70 px-4 py-4 shadow-sm sm:flex-row sm:items-center sm:justify-between"
+                  className="flex flex-col gap-3 rounded-[1.5rem] border border-border/40 bg-gradient-to-br from-background/90 to-background/65 px-4 py-4 shadow-sm transition hover:border-cyan-500/30 hover:shadow-md hover:shadow-cyan-500/10 sm:flex-row sm:items-center sm:justify-between"
                 >
                   <div className="min-w-0 space-y-1">
                     <div className="flex flex-wrap items-center gap-2">
@@ -140,8 +142,8 @@ export default async function AdminOverviewPage() {
         </AdminPanel>
 
         <AdminPanel
-          title="维护入口"
-          description="把最常改的四块数据源拆到独立页面，避免在一个超长表单里混用不同表结构。"
+          title="入口"
+          description="打开常用页面。"
         >
           <div className="space-y-3">
             {SECTION_LINKS.map((item) => {
@@ -151,7 +153,7 @@ export default async function AdminOverviewPage() {
                 <Link
                   key={item.href}
                   href={item.href}
-                  className="group flex items-start justify-between gap-3 rounded-[1.5rem] border border-border/40 bg-background/70 px-4 py-4 transition hover:border-border/80 hover:bg-background"
+                  className="group flex items-start justify-between gap-3 rounded-[1.5rem] border border-border/40 bg-gradient-to-br from-background/90 to-background/65 px-4 py-4 transition duration-200 hover:border-cyan-500/30 hover:shadow-md hover:shadow-cyan-500/10"
                 >
                   <div className="flex items-start gap-3">
                     <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-border/40 bg-background/90 text-muted-foreground transition group-hover:text-foreground">

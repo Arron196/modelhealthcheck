@@ -24,9 +24,8 @@ export default async function AdminStoragePage({searchParams}: AdminStoragePageP
   return (
     <div className="space-y-6">
       <AdminPageIntro
-        eyebrow="Admin / Storage"
-        title="存储管理与诊断"
-        description="这个页面负责统一管理当前项目的托管存储拓扑：包括 PostgreSQL 连接测试、控制面导入、主备启用，以及当前实际运行在 Supabase、本地 Postgres 还是 SQLite 上的诊断结果。"
+        title="存储"
+        description="查看后端状态，处理连接、导入和切换。"
       />
 
       {feedback ? <AdminStatusBanner type={feedback.type} message={feedback.message} /> : null}

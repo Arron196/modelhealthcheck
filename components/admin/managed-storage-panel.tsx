@@ -20,12 +20,12 @@ export function ManagedStoragePanel() {
   const settings = loadManagedStorageSettings();
   const activeTopology = settings.activePrimaryProvider
     ? `${settings.activePrimaryProvider} → ${settings.activeBackupProvider}`
-    : "env-only";
+    : "仅环境变量";
 
   return (
     <AdminPanel
-      title="托管后端切换"
-      description="在这里维护 PostgreSQL 连接、主备角色和受控切换流程。当前流程固定为：保存草稿 → 测试连接 → 导入当前数据（含历史记录）→ 启用。"
+      title="切换存储"
+      description="维护 PostgreSQL 连接、主备角色和切换流程。"
     >
       <div className="space-y-6">
         <div className="grid gap-4 md:grid-cols-3">
@@ -36,12 +36,12 @@ export function ManagedStoragePanel() {
           />
           <AdminStatCard
             label="PostgreSQL 测试"
-            value={settings.postgresLastTestOk ? "PASS" : "PENDING"}
+            value={settings.postgresLastTestOk ? "通过" : "待测"}
             helper={settings.postgresLastTestedAt ?? "尚未执行连接测试"}
           />
           <AdminStatCard
             label="导入状态"
-            value={settings.lastImportOk ? "READY" : "PENDING"}
+            value={settings.lastImportOk ? "就绪" : "待导入"}
             helper={
               settings.lastImportSummary
                 ? `${settings.lastImportSummary.targetProvider} @ ${settings.lastImportSummary.importedAt}`
@@ -50,15 +50,15 @@ export function ManagedStoragePanel() {
           />
           <AdminStatCard
             label="Supabase 凭据"
-            value={settings.hasSupabaseAdminCredentials ? "READY" : "OPTIONAL"}
+            value={settings.hasSupabaseAdminCredentials ? "已就绪" : "可选"}
             helper={settings.supabaseProjectHost ?? "尚未保存托管 Supabase 项目"}
           />
           <AdminStatCard
-            label="Admin 会话密钥"
-            value={settings.adminSessionSecretConfigured ? "READY" : "AUTO"}
+            label="会话密钥"
+            value={settings.adminSessionSecretConfigured ? "已就绪" : "自动"}
             helper={
               settings.adminSessionSecretConfigured
-                ? "已保存在 bootstrap store 中"
+                ? "已保存在本地配置中"
                 : "首次创建管理员时会自动生成"
             }
           />
@@ -145,11 +145,11 @@ export function ManagedStoragePanel() {
 
           <div className="grid gap-4 md:grid-cols-2">
             <AdminField
-              label="Supabase public / anon key"
+              label="Supabase 公钥"
               description={
                 settings.supabasePublishableKeyMasked
                   ? `已保存公开 key：${settings.supabasePublishableKeyMasked}。留空可保留现值。`
-                  : "可选。主要用于 public / SSR 诊断链路，不影响服务端 control-plane 写入。"
+                  : "可选。主要用于公开页检查，不影响服务端写入。"
               }
             >
               <AdminTextarea
@@ -161,11 +161,11 @@ export function ManagedStoragePanel() {
             </AdminField>
 
             <AdminField
-              label="Supabase service-role key"
+              label="Supabase 管理密钥"
               description={
                 settings.supabaseServiceRoleKeyMasked
                   ? `已保存管理 key：${settings.supabaseServiceRoleKeyMasked}。留空可保留现值。`
-                  : "必填于托管 Supabase 流程；后台管理、导入和诊断都依赖这个 key。"
+                  : "托管 Supabase 流程必填；后台管理、导入和诊断都依赖这个密钥。"
               }
             >
               <AdminTextarea
@@ -185,7 +185,7 @@ export function ManagedStoragePanel() {
               测试 PostgreSQL 连接
             </Button>
             <Button type="submit" formAction={importManagedStorageAction} variant="outline" className="rounded-full">
-              导入当前数据到目标后端
+              导入数据到目标后端
             </Button>
             <Button type="submit" formAction={activateManagedStorageAction} className="rounded-full">
               启用主备拓扑
@@ -199,7 +199,7 @@ export function ManagedStoragePanel() {
             <div className="grid gap-4 md:grid-cols-4">
               <AdminStatCard label="目标主机" value={settings.postgresTestReport.host ?? "—"} helper={`SSL：${settings.postgresTestReport.sslMode}`} />
               <AdminStatCard label="目标数据库" value={settings.postgresTestReport.database ?? "—"} helper={settings.postgresTestReport.port ? `端口 ${settings.postgresTestReport.port}` : "未显式指定端口"} />
-              <AdminStatCard label="当前用户" value={settings.postgresTestReport.currentUser ?? "—"} helper="来自服务端 current_user" />
+              <AdminStatCard label="当前用户" value={settings.postgresTestReport.currentUser ?? "—"} helper="来自数据库返回值" />
               <AdminStatCard label="测试时间" value={settings.postgresTestReport.testedAt} helper={settings.postgresTestReport.serverVersion ?? "未返回版本信息"} />
             </div>
             <div className="space-y-2">
@@ -216,15 +216,15 @@ export function ManagedStoragePanel() {
 
         {settings.lastImportSummary ? (
           <div className="rounded-[1.5rem] border border-border/40 bg-background/60 p-4 shadow-sm">
-            <div className="text-sm font-medium text-foreground">最近一次导入摘要</div>
+            <div className="text-sm font-medium text-foreground">最近导入结果</div>
             <div className="mt-3 grid gap-4 md:grid-cols-3 xl:grid-cols-7">
-              <AdminStatCard label="Admin Users" value={settings.lastImportSummary.counts.adminUsers} helper="保留 id / hash" />
-              <AdminStatCard label="Configs" value={settings.lastImportSummary.counts.checkConfigs} helper="Provider 配置" />
-              <AdminStatCard label="History" value={settings.lastImportSummary.counts.historyRows ?? 0} helper="检测历史记录" />
-              <AdminStatCard label="Templates" value={settings.lastImportSummary.counts.requestTemplates} helper="请求模板" />
-              <AdminStatCard label="Groups" value={settings.lastImportSummary.counts.groups} helper="分组信息" />
-              <AdminStatCard label="Notifications" value={settings.lastImportSummary.counts.notifications} helper="系统通知" />
-              <AdminStatCard label="Site Settings" value={settings.lastImportSummary.counts.hasSiteSettings ? "YES" : "NO"} helper={settings.lastImportSummary.importedAt} />
+              <AdminStatCard label="管理员" value={settings.lastImportSummary.counts.adminUsers} helper="保留 id / hash" />
+              <AdminStatCard label="配置" value={settings.lastImportSummary.counts.checkConfigs} helper="服务配置" />
+              <AdminStatCard label="历史" value={settings.lastImportSummary.counts.historyRows ?? 0} helper="检测历史记录" />
+              <AdminStatCard label="模板" value={settings.lastImportSummary.counts.requestTemplates} helper="请求模板" />
+              <AdminStatCard label="分组" value={settings.lastImportSummary.counts.groups} helper="分组信息" />
+              <AdminStatCard label="通知" value={settings.lastImportSummary.counts.notifications} helper="系统通知" />
+              <AdminStatCard label="站点设置" value={settings.lastImportSummary.counts.hasSiteSettings ? "有" : "无"} helper={settings.lastImportSummary.importedAt} />
             </div>
           </div>
         ) : null}

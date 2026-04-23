@@ -9,11 +9,11 @@ export default function NotFound() {
       </div>
 
       <h1 className="mb-4 text-3xl font-bold tracking-tight text-foreground md:text-5xl">
-        404 Page Not Found
+        页面不存在
       </h1>
       
       <p className="mb-8 max-w-md text-muted-foreground">
-        The page you are looking for does not exist or has been moved.
+        你访问的页面不存在，或已经被移动。
       </p>
 
       <Link
@@ -21,7 +21,7 @@ export default function NotFound() {
         className="inline-flex items-center gap-2 rounded-full bg-foreground px-6 py-2.5 text-sm font-medium text-background transition-transform hover:scale-105 active:scale-95"
       >
         <ChevronLeft className="h-4 w-4" />
-        Back to Dashboard
+        返回首页
       </Link>
     </div>
   );

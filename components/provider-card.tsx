@@ -25,7 +25,6 @@ interface ProviderCardProps {
 const formatLatency = (value: number | null | undefined) =>
   typeof value === "number" ? `${value} ms` : "—";
 
-/** Tech-style decorative corner plus marker */
 const CornerPlus = ({ className }: { className?: string }) => (
   <svg
     viewBox="0 0 24 24"
@@ -57,8 +56,9 @@ export function ProviderCard({
     : null;
 
   return (
-    <div className="group relative flex flex-col overflow-hidden rounded-2xl border border-border/40 bg-background/40 backdrop-blur-xl transition-all duration-300 hover:-translate-y-1 hover:shadow-lg hover:shadow-primary/5 hover:border-primary/20">
-      {/* Decorative markers */}
+    <div className="group relative flex flex-col overflow-hidden rounded-2xl border border-border/40 bg-background/40 backdrop-blur-xl transition-all duration-500 hover:-translate-y-1 hover:shadow-2xl hover:shadow-primary/10 hover:border-primary/30 dark:hover:shadow-primary/5 hover:bg-background/60">
+      <div className="absolute inset-0 -z-10 bg-gradient-to-br from-primary/5 via-transparent to-transparent opacity-0 transition-opacity duration-500 group-hover:opacity-100" />
+
       <CornerPlus className="left-2 top-2 opacity-0 transition-opacity group-hover:opacity-100" />
       <CornerPlus className="right-2 top-2 opacity-0 transition-opacity group-hover:opacity-100" />
 
@@ -93,29 +93,30 @@ export function ProviderCard({
         </div>
 
         <div className="mb-4 grid grid-cols-2 gap-3">
-          <div className="rounded-xl bg-muted/30 p-3 transition-colors group-hover:bg-muted/50">
-            <div className="flex items-center gap-2 text-muted-foreground">
-              <Zap className="h-3.5 w-3.5" />
-              <span className="text-[10px] font-semibold uppercase tracking-wider">对话延迟</span>
+          <div className="group/stat relative overflow-hidden rounded-xl bg-muted/20 p-3 transition-colors group-hover:bg-muted/40">
+            <div className="absolute inset-0 -z-10 translate-y-full bg-gradient-to-t from-primary/5 to-transparent transition-transform duration-300 group-hover/stat:translate-y-0" />
+            <div className="flex items-center gap-2 text-muted-foreground transition-colors group-hover/stat:text-foreground/80">
+              <Zap className="h-3.5 w-3.5 text-amber-500/70" />
+              <span className="text-[10px] font-semibold uppercase tracking-wider">响应延迟</span>
             </div>
-            <div className="mt-1 font-mono text-lg font-medium leading-none text-foreground">
+            <div className="mt-1.5 font-mono text-lg font-medium leading-none text-foreground">
               {formatLatency(latest.latencyMs)}
             </div>
           </div>
 
-          <div className="rounded-xl bg-muted/30 p-3 transition-colors group-hover:bg-muted/50">
-            <div className="flex items-center gap-2 text-muted-foreground">
-              <Radio className="h-3.5 w-3.5" />
+          <div className="group/stat relative overflow-hidden rounded-xl bg-muted/20 p-3 transition-colors group-hover:bg-muted/40">
+            <div className="absolute inset-0 -z-10 translate-y-full bg-gradient-to-t from-primary/5 to-transparent transition-transform duration-300 group-hover/stat:translate-y-0" />
+            <div className="flex items-center gap-2 text-muted-foreground transition-colors group-hover/stat:text-foreground/80">
+              <Radio className="h-3.5 w-3.5 text-blue-500/70" />
               <span className="text-[10px] font-semibold uppercase tracking-wider">端点 PING</span>
             </div>
-            <div className="mt-1 font-mono text-lg font-medium leading-none text-foreground">
+            <div className="mt-1.5 font-mono text-lg font-medium leading-none text-foreground">
               {formatLatency(latest.pingLatencyMs)}
             </div>
           </div>
         </div>
 
         <div className="space-y-3 border-t border-border/30 pt-4">
-          {/* Official Status Row */}
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-muted-foreground">官方状态</span>
             {officialStatus && officialStatusMeta ? (
@@ -187,8 +188,7 @@ export function ProviderCard({
         </div>
       </div>
 
-      {/* Timeline Section - Visual separation */}
-      <div className="border-t border-border/40 bg-muted/10 px-5 py-4">
+      <div className="border-t border-border/20 bg-gradient-to-b from-muted/5 to-muted/20 px-5 py-4 transition-colors duration-500 group-hover:from-muted/10 group-hover:to-muted/30">
         <StatusTimeline items={items} nextRefreshInMs={timeToNextRefresh} isMaintenance={isMaintenance} />
       </div>
     </div>

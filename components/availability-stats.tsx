@@ -52,12 +52,12 @@ export function AvailabilityStats({ stats, period, isMaintenance }: Availability
   }
 
   return (
-    <div className="flex items-center justify-between rounded-lg bg-muted/30 px-3 py-2">
+    <div className="group/avail flex items-center justify-between rounded-lg bg-muted/20 px-3 py-2 transition-colors hover:bg-muted/40">
       <div className="space-y-1">
-        <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+        <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground transition-colors group-hover/avail:text-foreground/80">
           可用性 ({PERIOD_LABELS[period]})
         </p>
-        <p className="text-[10px] text-muted-foreground">
+        <p className="text-[10px] text-muted-foreground/70 transition-colors group-hover/avail:text-muted-foreground">
           {current
             ? `${current.operationalCount}/${current.totalChecks} 成功`
             : "暂无数据"}
@@ -65,7 +65,7 @@ export function AvailabilityStats({ stats, period, isMaintenance }: Availability
       </div>
       <span
         className={cn(
-          "font-mono text-sm font-bold",
+          "font-mono text-sm font-bold truncate transition-transform duration-300 group-hover/avail:scale-105",
           pct === null ? "text-muted-foreground" : ""
         )}
         style={getAvailabilityColorStyle(pct)}

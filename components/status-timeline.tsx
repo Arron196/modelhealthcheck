@@ -71,7 +71,7 @@ export function StatusTimeline({ items, nextRefreshInMs, isMaintenance }: Status
     }
     return (
       <div className="flex items-center justify-center rounded-lg border border-dashed border-border/50 bg-muted/10 p-4 text-xs text-muted-foreground">
-        NO DATA AVAILABLE
+        暂无记录
       </div>
     );
   }
@@ -88,16 +88,16 @@ export function StatusTimeline({ items, nextRefreshInMs, isMaintenance }: Status
       {/* Header / Legend */}
       <div className="flex items-center justify-between text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
         <div className="flex items-center gap-2">
-          <span>{segmentCount <= 1 ? "History (latest)" : `History (${segmentCount}pts)`}</span>
+          <span>{segmentCount <= 1 ? "最近记录" : `最近 ${segmentCount} 条`}</span>
         </div>
         <div className="flex items-center gap-2">
            {nextRefreshLabel ? (
              <span className="flex items-center gap-1.5 text-primary">
                <Clock className="h-3 w-3" />
-               Next update in {nextRefreshLabel}
+               下次更新 {nextRefreshLabel}
              </span>
            ) : (
-             <span className="opacity-50">Manual Refresh</span>
+             <span className="opacity-50">手动刷新</span>
            )}
         </div>
       </div>
@@ -111,7 +111,7 @@ export function StatusTimeline({ items, nextRefreshInMs, isMaintenance }: Status
                 <div
                   key={`placeholder-${index}`}
                   className="flex-1 rounded-[1px] bg-muted/10"
-                  aria-label="No Data"
+                  aria-label="暂无记录"
                 />
               );
             }
@@ -162,11 +162,11 @@ export function StatusTimeline({ items, nextRefreshInMs, isMaintenance }: Status
                    
                    <div className="grid gap-2 text-xs">
                       <div className="flex items-center justify-between">
-                         <span className="text-muted-foreground">Latency</span>
+                         <span className="text-muted-foreground">延迟</span>
                          <span className="font-mono font-medium">{formatLatency(segment.latencyMs)}</span>
                       </div>
                       <div className="flex items-center justify-between">
-                         <span className="text-muted-foreground">Ping</span>
+                         <span className="text-muted-foreground">连通</span>
                          <span className="font-mono font-medium">{formatLatency(segment.pingLatencyMs)}</span>
                       </div>
                    </div>
@@ -185,8 +185,8 @@ export function StatusTimeline({ items, nextRefreshInMs, isMaintenance }: Status
       
       {/* Axis labels */}
       <div className="flex justify-between text-[9px] font-medium uppercase tracking-widest text-muted-foreground/50">
-        <span>Past</span>
-        <span>Now</span>
+        <span>较早</span>
+        <span>现在</span>
       </div>
     </div>
   );

@@ -13,7 +13,6 @@ export default async function AdminLayout({children}: {children: ReactNode}) {
       username={session?.username}
       siteName={siteSettings.siteName}
       consoleTitle={siteSettings.adminConsoleTitle}
-      consoleDescription={siteSettings.adminConsoleDescription}
     >
       {children}
     </AdminShell>

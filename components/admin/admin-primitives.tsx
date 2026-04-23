@@ -21,28 +21,25 @@ export function CornerPlus({className}: {className?: string}) {
 }
 
 export function AdminPageIntro(props: {
-  eyebrow: string;
+  eyebrow?: string;
   title: string;
   description: string;
   actions?: ReactNode;
 }) {
   return (
-    <section className="relative overflow-hidden rounded-[2rem] border border-border/50 bg-background/60 px-5 py-6 shadow-sm backdrop-blur-sm sm:px-8 sm:py-8">
-      <CornerPlus className="left-4 top-4" />
-      <CornerPlus className="right-4 top-4" />
-      <CornerPlus className="bottom-4 left-4" />
-      <CornerPlus className="bottom-4 right-4" />
+    <section className="relative overflow-hidden rounded-[2rem] border border-border/40 bg-background/50 px-5 py-6 shadow-sm backdrop-blur-md sm:px-8 sm:py-8 sm:mt-4">
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_20%_0%,rgba(14,165,233,0.08),transparent_40%),radial-gradient(circle_at_80%_100%,rgba(16,185,129,0.06),transparent_40%)]"
+      />
 
-      <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-        <div className="max-w-3xl space-y-3">
-          <div className="inline-flex items-center gap-2 rounded-full border border-border/40 bg-background/70 px-3 py-1 text-[11px] font-medium uppercase tracking-[0.3em] text-muted-foreground shadow-sm">
-            {props.eyebrow}
-          </div>
-          <div className="space-y-2">
-            <h1 className="text-3xl font-semibold tracking-[-0.04em] text-foreground sm:text-5xl">
+      <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between relative z-10">
+        <div className="relative max-w-3xl space-y-3">
+          <div className="space-y-3">
+            <h1 className="text-3xl font-bold tracking-tight text-foreground sm:text-4xl text-transparent bg-clip-text bg-gradient-to-r from-foreground to-foreground/70">
               {props.title}
             </h1>
-            <p className="max-w-2xl text-sm leading-7 text-muted-foreground sm:text-base">
+            <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground/80 sm:text-base">
               {props.description}
             </p>
           </div>
@@ -62,7 +59,7 @@ export function AdminPanel(props: {
   children: ReactNode;
 }) {
   return (
-    <section className={cn("rounded-[2rem] border border-border/50 bg-white/30 p-5 shadow-sm backdrop-blur-sm dark:bg-black/10 sm:p-6", props.className)}>
+    <section className={cn("rounded-[2rem] border border-border/60 bg-white/40 p-5 shadow-lg shadow-black/5 backdrop-blur-xl dark:bg-black/20 dark:shadow-black/25 sm:p-6", props.className)}>
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="space-y-1">
           <h2 className="text-xl font-semibold tracking-tight text-foreground">{props.title}</h2>
@@ -83,7 +80,7 @@ export function AdminStatCard(props: {
   helper: string;
 }) {
   return (
-    <div className="rounded-[1.75rem] border border-border/50 bg-background/70 p-5 shadow-sm backdrop-blur-sm">
+    <div className="rounded-[1.75rem] border border-border/60 bg-gradient-to-br from-background/90 to-background/65 p-5 shadow-md shadow-black/5 backdrop-blur-sm dark:shadow-black/20">
       <p className="text-xs font-medium uppercase tracking-[0.28em] text-muted-foreground">
         {props.label}
       </p>
@@ -157,7 +154,7 @@ export function AdminInput(props: ComponentPropsWithoutRef<"input">) {
     <input
       {...props}
       className={cn(
-        "w-full rounded-2xl border border-border/50 bg-background/80 px-4 py-3 text-sm text-foreground shadow-sm outline-none transition placeholder:text-muted-foreground/70 focus:border-foreground/20 focus:ring-2 focus:ring-foreground/10",
+        "w-full rounded-2xl border border-border/50 bg-background/85 px-4 py-3 text-sm text-foreground shadow-sm outline-none transition placeholder:text-muted-foreground/70 focus:border-cyan-500/35 focus:ring-2 focus:ring-cyan-500/15",
         props.className
       )}
     />
@@ -169,7 +166,7 @@ export function AdminTextarea(props: ComponentPropsWithoutRef<"textarea">) {
     <textarea
       {...props}
       className={cn(
-        "min-h-[130px] w-full rounded-2xl border border-border/50 bg-background/80 px-4 py-3 text-sm text-foreground shadow-sm outline-none transition placeholder:text-muted-foreground/70 focus:border-foreground/20 focus:ring-2 focus:ring-foreground/10",
+        "min-h-[130px] w-full rounded-2xl border border-border/50 bg-background/85 px-4 py-3 text-sm text-foreground shadow-sm outline-none transition placeholder:text-muted-foreground/70 focus:border-cyan-500/35 focus:ring-2 focus:ring-cyan-500/15",
         props.className
       )}
     />
@@ -181,7 +178,7 @@ export function AdminSelect(props: ComponentPropsWithoutRef<"select">) {
     <select
       {...props}
       className={cn(
-        "w-full rounded-2xl border border-border/50 bg-background/80 px-4 py-3 text-sm text-foreground shadow-sm outline-none transition focus:border-foreground/20 focus:ring-2 focus:ring-foreground/10",
+        "w-full rounded-2xl border border-border/50 bg-background/85 px-4 py-3 text-sm text-foreground shadow-sm outline-none transition focus:border-cyan-500/35 focus:ring-2 focus:ring-cyan-500/15",
         props.className
       )}
     />

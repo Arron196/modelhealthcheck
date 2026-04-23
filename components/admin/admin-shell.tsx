@@ -3,52 +3,44 @@
 import type {ReactNode} from "react";
 import Link from "next/link";
 import {usePathname} from "next/navigation";
-import {BellRing, Boxes, FolderTree, HardDrive, LayoutDashboard, Layers3, Settings2, ShieldCheck} from "lucide-react";
+import {ArrowRight, BellRing, Boxes, FolderTree, HardDrive, LayoutDashboard, Layers3, Settings2} from "lucide-react";
 
-import {CornerPlus} from "@/components/admin/admin-primitives";
 import {cn} from "@/lib/utils";
 
 const NAV_ITEMS = [
   {
     href: "/admin",
     label: "总览",
-    description: "运行态与入口分发",
     icon: LayoutDashboard,
   },
   {
     href: "/admin/configs",
     label: "检测配置",
-    description: "Provider 配置与开关",
     icon: Boxes,
   },
   {
     href: "/admin/templates",
     label: "请求模板",
-    description: "头信息与元数据模板",
     icon: Layers3,
   },
   {
     href: "/admin/groups",
     label: "分组信息",
-    description: "站点链接与标签维护",
     icon: FolderTree,
   },
   {
     href: "/admin/notifications",
     label: "系统通知",
-    description: "首页横幅与告警文案",
     icon: BellRing,
   },
   {
     href: "/admin/storage",
     label: "存储诊断",
-    description: "主备拓扑、后端解析与控制面检查",
     icon: HardDrive,
   },
   {
     href: "/admin/settings",
     label: "站点设置",
-    description: "品牌名称与全局展示文案",
     icon: Settings2,
   },
 ] as const;
@@ -66,13 +58,11 @@ export function AdminShell({
   username,
   siteName,
   consoleTitle,
-  consoleDescription,
 }: {
   children: ReactNode;
   username?: string;
   siteName: string;
   consoleTitle: string;
-  consoleDescription: string;
 }) {
   const pathname = usePathname();
 
@@ -81,34 +71,25 @@ export function AdminShell({
   }
 
   return (
-    <div className="min-h-screen py-8 md:py-16">
+    <div className="relative min-h-screen overflow-x-hidden py-8 md:py-16">
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(circle_at_10%_10%,rgba(14,165,233,0.12),transparent_40%),radial-gradient(circle_at_90%_0%,rgba(236,72,153,0.12),transparent_36%),radial-gradient(circle_at_50%_100%,rgba(16,185,129,0.1),transparent_34%)]"
+      />
       <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-6 px-3 sm:px-6 lg:px-12 xl:flex-row xl:items-start">
-        <aside className="xl:sticky xl:top-8 xl:w-[300px] xl:self-start">
-          <div className="relative overflow-hidden rounded-[2rem] border border-border/50 bg-background/60 p-5 shadow-sm backdrop-blur-sm sm:p-6">
-            <CornerPlus className="left-4 top-4" />
-            <CornerPlus className="right-4 top-4" />
-            <div className="space-y-6">
-              <div className="space-y-3">
-                <div className="inline-flex items-center gap-2 rounded-full border border-border/40 bg-background/70 px-3 py-1 text-[11px] font-medium uppercase tracking-[0.3em] text-muted-foreground shadow-sm">
-                  Internal Console
-                </div>
-                <div>
-                  <h1 className="text-2xl font-semibold tracking-[-0.05em] text-foreground sm:text-3xl">
-                    {consoleTitle}
-                  </h1>
-                  <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                    {consoleDescription}
-                  </p>
-                  <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-border/40 bg-background/70 px-3 py-1 text-[11px] font-medium uppercase tracking-[0.22em] text-muted-foreground shadow-sm">
-                    <span>Site</span>
-                    <span className="max-w-[150px] truncate text-foreground/80 normal-case tracking-normal">
-                      {siteName}
-                    </span>
-                  </div>
+        <aside className="!static xl:w-[320px] xl:self-start">
+          <div className="relative overflow-hidden rounded-[2rem] border border-border/60 bg-background/80 p-5 shadow-[0_20px_60px_rgba(0,0,0,0.08)] backdrop-blur-xl sm:p-6 dark:shadow-black/25">
+            <div className="space-y-5">
+              <div className="space-y-2">
+                <h1 className="text-2xl font-semibold tracking-[-0.05em] text-foreground sm:text-3xl">
+                  {consoleTitle}
+                </h1>
+                <div className="inline-flex items-center rounded-full border border-border/40 bg-background/75 px-3 py-1 text-sm text-muted-foreground shadow-sm">
+                  {siteName}
                 </div>
               </div>
 
-              <div className="grid gap-2">
+              <nav className="grid gap-2.5" aria-label="Admin navigation">
                 {NAV_ITEMS.map((item) => {
                   const active = isActivePath(pathname, item.href);
                   const Icon = item.icon;
@@ -117,63 +98,59 @@ export function AdminShell({
                     <Link
                       key={item.href}
                       href={item.href}
+                      aria-current={active ? "page" : undefined}
                       className={cn(
-                        "group rounded-[1.5rem] border px-4 py-3 transition",
+                        "group flex items-center gap-3 rounded-[1.45rem] border px-4 py-3.5 text-left transition duration-200",
                         active
-                          ? "border-foreground/15 bg-foreground text-background shadow-sm"
-                          : "border-border/40 bg-background/70 text-foreground hover:border-border/80 hover:bg-background"
+                          ? "border-cyan-500/20 bg-cyan-500/[0.08] shadow-sm shadow-cyan-500/10"
+                          : "border-border/40 bg-background/70 hover:border-cyan-500/25 hover:bg-background"
                       )}
                     >
-                      <div className="flex items-start gap-3">
+                      <div
+                        className={cn(
+                          "flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border transition",
+                          active
+                            ? "border-cyan-500/20 bg-cyan-500/10 text-cyan-700 dark:text-cyan-200"
+                            : "border-border/40 bg-background/80 text-muted-foreground group-hover:text-foreground"
+                        )}
+                      >
+                        <Icon className="h-4 w-4" />
+                      </div>
+                      <div className="min-w-0 flex-1">
                         <div
                           className={cn(
-                            "mt-0.5 flex h-10 w-10 items-center justify-center rounded-2xl border",
-                            active
-                              ? "border-white/10 bg-white/10 text-background"
-                              : "border-border/40 bg-background/80 text-muted-foreground transition group-hover:text-foreground"
+                            "text-sm leading-5 tracking-[-0.01em]",
+                            active ? "font-semibold text-foreground" : "font-medium text-foreground"
                           )}
                         >
-                          <Icon className="h-4 w-4" />
-                        </div>
-                        <div className="min-w-0">
-                          <div className="text-sm font-medium">{item.label}</div>
-                          <div
-                            className={cn(
-                              "mt-1 text-xs leading-5",
-                              active ? "text-background/70" : "text-muted-foreground"
-                            )}
-                          >
-                            {item.description}
-                          </div>
+                          {item.label}
                         </div>
                       </div>
+                      <ArrowRight
+                        className={cn(
+                          "h-4 w-4 shrink-0 transition duration-200",
+                          active
+                            ? "translate-x-0 text-foreground opacity-100"
+                            : "text-muted-foreground opacity-0 group-hover:translate-x-0.5 group-hover:opacity-100 group-hover:text-foreground"
+                        )}
+                      />
                     </Link>
                   );
                 })}
-              </div>
-
-              <div className="rounded-[1.5rem] border border-border/40 bg-background/70 p-4">
-                <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-                  <ShieldCheck className="h-4 w-4 text-muted-foreground" />
-                  Server-side mutations only
-                </div>
-                <p className="mt-2 text-xs leading-5 text-muted-foreground">
-                  所有写操作都经由 service-role server action 执行，避免把敏感配置写进客户端逻辑。
-                </p>
-              </div>
+              </nav>
 
               {username ? (
-                <div className="rounded-[1.5rem] border border-border/40 bg-background/70 p-4">
-                  <div className="text-xs uppercase tracking-[0.24em] text-muted-foreground">
-                    Active Admin
+                <div className="rounded-[1.5rem] border border-border/40 bg-gradient-to-br from-background/80 to-background/60 p-4">
+                  <div className="text-xs uppercase tracking-[0.22em] text-muted-foreground">
+                    当前账号
                   </div>
                   <div className="mt-2 text-sm font-medium text-foreground">{username}</div>
                   <form method="post" action="/admin/logout" className="mt-4">
                     <button
                       type="submit"
-                      className="inline-flex items-center gap-2 rounded-full border border-border/40 bg-background/80 px-4 py-2 text-sm text-muted-foreground transition hover:border-border/80 hover:text-foreground"
+                      className="inline-flex items-center gap-2 rounded-full border border-border/40 bg-background/80 px-4 py-2 text-sm text-muted-foreground transition hover:border-cyan-500/30 hover:text-foreground"
                     >
-                      退出登录
+                      退出
                     </button>
                   </form>
                 </div>
@@ -181,9 +158,9 @@ export function AdminShell({
 
               <Link
                 href="/"
-                className="inline-flex items-center gap-2 rounded-full border border-border/40 bg-background/70 px-4 py-2 text-sm text-muted-foreground transition hover:border-border/80 hover:text-foreground"
+                className="inline-flex items-center gap-2 rounded-full border border-border/40 bg-background/70 px-4 py-2 text-sm text-muted-foreground transition hover:border-cyan-500/30 hover:text-foreground"
               >
-                返回公开仪表盘
+                返回首页
               </Link>
             </div>
           </div>

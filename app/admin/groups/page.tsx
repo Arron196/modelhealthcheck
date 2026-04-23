@@ -25,15 +25,14 @@ export default async function AdminGroupsPage({searchParams}: AdminGroupsPagePro
   return (
     <div className="space-y-6">
       <AdminPageIntro
-        eyebrow="Admin / Groups"
-        title="分组信息管理"
-        description="维护 `group_info`，让首页与分组详情页共享统一的官网链接和标签文案。"
+        title="分组信息"
+        description="管理分组名称、链接和标签。"
       />
 
       {feedback ? <AdminStatusBanner type={feedback.type} message={feedback.message} /> : null}
 
       <div className="grid gap-6 xl:grid-cols-[0.85fr_1.45fr]">
-        <AdminPanel title="新增分组" description="分组名称应与配置中的 group_name 保持一致。">
+        <AdminPanel title="新增分组" description="创建一个新分组。">
           <form action={upsertGroupAction} className="space-y-4">
             <input type="hidden" name="returnTo" value="/admin/groups" />
 
@@ -45,7 +44,7 @@ export default async function AdminGroupsPage({searchParams}: AdminGroupsPagePro
               <AdminInput name="website_url" placeholder="https://openai.com" />
             </AdminField>
 
-            <AdminField label="标签" description="保持和首页展示一致，推荐逗号分隔。">
+            <AdminField label="标签" description="推荐用逗号分隔。">
               <AdminInput name="tags" placeholder="全球, API, 主站" />
             </AdminField>
 
@@ -55,7 +54,7 @@ export default async function AdminGroupsPage({searchParams}: AdminGroupsPagePro
           </form>
         </AdminPanel>
 
-        <AdminPanel title="现有分组" description="更新后会影响首页分组卡片与分组详情页的显示信息。">
+        <AdminPanel title="现有分组" description="编辑已有分组。">
           <div className="space-y-4">
             {groups.length === 0 ? (
               <div className="rounded-[1.5rem] border border-dashed border-border/50 px-4 py-6 text-sm text-muted-foreground">

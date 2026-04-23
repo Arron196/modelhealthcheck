@@ -14,10 +14,18 @@ interface GroupPageProps {
   params: Promise<{ groupName: string }>;
 }
 
+function safeDecodeSegment(value: string): string | null {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return null;
+  }
+}
+
 // 生成页面元数据
 export async function generateMetadata({ params }: GroupPageProps) {
   const { groupName } = await params;
-  const decodedGroupName = decodeURIComponent(groupName);
+  const decodedGroupName = safeDecodeSegment(groupName) ?? groupName;
   const siteSettings = await loadSiteSettings();
 
   return {
@@ -28,7 +36,10 @@ export async function generateMetadata({ params }: GroupPageProps) {
 
 export default async function GroupPage({ params }: GroupPageProps) {
   const { groupName } = await params;
-  const decodedGroupName = decodeURIComponent(groupName);
+  const decodedGroupName = safeDecodeSegment(groupName);
+  if (!decodedGroupName) {
+    notFound();
+  }
 
   const [availableGroups, adminSession] = await Promise.all([
     getAvailableGroups(),

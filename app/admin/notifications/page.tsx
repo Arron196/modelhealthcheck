@@ -33,15 +33,14 @@ export default async function AdminNotificationsPage({
   return (
     <div className="space-y-6">
       <AdminPageIntro
-        eyebrow="Admin / Notifications"
-        title="系统通知管理"
-        description="维护首页顶部横幅所使用的 `system_notifications`。激活后，公开站点会在通知接口下一次刷新时展示对应文案。"
+        title="系统通知"
+        description="管理首页顶部横幅。"
       />
 
       {feedback ? <AdminStatusBanner type={feedback.type} message={feedback.message} /> : null}
 
       <div className="grid gap-6 xl:grid-cols-[0.9fr_1.4fr]">
-        <AdminPanel title="新增通知" description="支持 info / warning / error 三种级别，用于不同紧急程度。">
+        <AdminPanel title="新增通知" description="创建一条新通知。">
           <form action={upsertNotificationAction} className="space-y-4">
             <input type="hidden" name="returnTo" value="/admin/notifications" />
 
@@ -72,7 +71,7 @@ export default async function AdminNotificationsPage({
           </form>
         </AdminPanel>
 
-        <AdminPanel title="现有通知" description="适合快速开启或下线首页横幅，不需要改动其他业务代码。">
+        <AdminPanel title="现有通知" description="编辑或停用已有通知。">
           <div className="space-y-4">
             {notifications.length === 0 ? (
               <div className="rounded-[1.5rem] border border-dashed border-border/50 px-4 py-6 text-sm text-muted-foreground">

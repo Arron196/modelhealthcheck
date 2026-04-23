@@ -141,3 +141,47 @@
     pointer-events: none;
   }
 }
+
+@keyframes fade-up {
+  0% {
+    opacity: 0;
+    transform: translateY(18px) scale(0.985);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes float-soft {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+  50% {
+    transform: translate3d(0, -14px, 0);
+  }
+}
+
+@layer utilities {
+  .animate-fade-up {
+    animation: fade-up 0.6s ease-out both;
+  }
+
+  .animate-float-soft {
+    animation: float-soft 10s ease-in-out infinite;
+  }
+
+  .animate-float-slower {
+    animation: float-soft 14s ease-in-out infinite;
+    animation-delay: -2s;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-up,
+  .animate-float-soft,
+  .animate-float-slower {
+    animation: none !important;
+  }
+}

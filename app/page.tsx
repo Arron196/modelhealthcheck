@@ -7,6 +7,7 @@ import packageJson from "@/package.json";
 import {loadSiteSettings} from "@/lib/site-settings";
 
 const ESTIMATED_VERSION = `v${packageJson.version}`;
+const FALLBACK_YEAR = String(new Date().getFullYear());
 
 export default async function Home() {
   const [siteSettings, adminSession] = await Promise.all([
@@ -26,7 +27,7 @@ export default async function Home() {
       <footer className="mt-16 border-t border-border/40">
         <div className="mx-auto flex w-full max-w-[1600px] flex-col items-center justify-between gap-4 px-3 py-6 sm:flex-row sm:px-6 lg:px-12">
           <div className="text-sm text-muted-foreground">
-            © <ClientYear placeholder="2026" /> {siteSettings.footerBrand}. All rights reserved.
+            © <ClientYear placeholder={FALLBACK_YEAR} /> {siteSettings.footerBrand}. 保留所有权利。
           </div>
 
           <div className="flex items-center gap-4">
@@ -34,11 +35,11 @@ export default async function Home() {
               href="/admin"
               className="inline-flex items-center gap-2 rounded-full border border-border/40 bg-background/60 px-3 py-1 text-xs text-muted-foreground shadow-sm transition hover:border-border/80 hover:text-foreground"
             >
-              <span className="font-medium opacity-70">Console</span>
-              <span>Admin</span>
+              <span className="font-medium opacity-70">进入</span>
+              <span>后台</span>
             </Link>
             <div className="inline-flex items-center gap-2 rounded-full border border-border/40 bg-background/60 px-3 py-1 text-xs text-muted-foreground shadow-sm transition hover:border-border/80 hover:text-foreground">
-              <span className="font-medium opacity-70">Ver.</span>
+              <span className="font-medium opacity-70">版本</span>
               <span className="font-mono">{ESTIMATED_VERSION}</span>
             </div>
           </div>
