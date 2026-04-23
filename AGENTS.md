@@ -1,22 +1,3 @@
-<!-- OPENSPEC:START -->
-# OpenSpec Instructions
-
-These instructions are for AI assistants working in this project.
-
-Always open `@/openspec/AGENTS.md` when the request:
-- Mentions planning or proposals (words like proposal, spec, change, plan)
-- Introduces new capabilities, breaking changes, architecture shifts, or big performance/security work
-- Sounds ambiguous and you need the authoritative spec before coding
-
-Use `@/openspec/AGENTS.md` to learn:
-- How to create and apply change proposals
-- Spec format and conventions
-- Project structure and guidelines
-
-Keep this managed block so 'openspec update' can refresh the instructions.
-
-<!-- OPENSPEC:END -->
-
 # Repository Guidelines
 
 ## Project Structure & Module Organization
@@ -35,7 +16,7 @@ Keep this managed block so 'openspec update' can refresh the instructions.
 Default to server components and add `"use client"` only when hooks or browser APIs are required. TypeScript files use two-space indentation, `const` bindings, and descriptive PascalCase component names (`DashboardView`). Sort imports Node → packages → `@/` aliases, avoiding long relative paths. Compose styling through Tailwind utility classes plus `clsx`/`tailwind-merge`, and move repeated variants into `components/ui/`.
 
 ## Testing Guidelines
-Automated tests are not wired up yet, but new logic should ship with either Vitest/Jest specs named `*.spec.ts` or clearly documented manual steps. Target ≥80 % coverage on `lib/core` and provider modules; explain any exception in the PR description. Until a runner is introduced, validate by running `pnpm dev`, exercising dashboard refreshes, and replaying Supabase migrations against a staging project before promoting to production.
+Automated tests are not wired up yet, but new logic should ship with either Vitest/Jest specs named `*.spec.ts` or clearly documented manual steps. Target ≥80% coverage on `lib/core` and provider modules; explain any exception in the PR description. Until a runner is introduced, validate by running `pnpm dev`, exercising dashboard refreshes, and replaying Supabase migrations against a staging project before promoting to production.
 
 ## Commit & Pull Request Guidelines
 History follows Conventional Commits (`feat:`, `fix:`, `chore:`, `refactor:`). Keep each commit scoped to a single concern and include related SQL migrations or config edits together. Pull requests must describe the change, link issues, attach UI screenshots/GIFs when visuals move, list the commands executed (build/lint/test), and mention any Supabase migration IDs applied. Request review early for provider updates so credentials and rate limits get a second set of eyes.

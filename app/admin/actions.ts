@@ -1,6 +1,6 @@
 "use server";
 
-import type {SiteSettingsMutationInput} from "@/lib/storage/types";
+import type {CheckConfigMutationInput, SiteSettingsMutationInput, StoredCheckConfigRow} from "@/lib/storage/types";
 import {revalidatePath} from "next/cache";
 import {redirect} from "next/navigation";
 import {isRedirectError} from "next/dist/client/components/redirect-error";
@@ -122,6 +122,59 @@ function parseJsonRecord(formData: FormData, key: string, label: string): JsonRe
       error instanceof Error ? error.message : `${label} 不是合法的 JSON 对象`
     );
   }
+}
+
+function parseModelList(raw: string): string[] {
+  const seen = new Set<string>();
+
+  return raw
+    .split(/[\n,，;；、]+/)
+    .map((item) => item.trim())
+    .filter((item) => {
+      if (!item || seen.has(item)) {
+        return false;
+      }
+
+      seen.add(item);
+      return true;
+    });
+}
+
+function stripGeneratedModelSuffix(name: string, currentModel: string): string {
+  const suffix = ` · ${currentModel}`;
+  return name.endsWith(suffix) ? name.slice(0, -suffix.length).trim() : name;
+}
+
+function buildConfigName(baseName: string, model: string, totalModels: number): string {
+  return totalModels > 1 ? `${baseName} · ${model}` : baseName;
+}
+
+function toCheckConfigMutationInput(
+  row: StoredCheckConfigRow,
+  overrides: Partial<CheckConfigMutationInput> = {}
+): CheckConfigMutationInput {
+  return {
+    id: row.id,
+    name: row.name,
+    type: row.type,
+    model: row.model,
+    endpoint: row.endpoint,
+    api_key: row.api_key,
+    enabled: row.enabled,
+    is_maintenance: row.is_maintenance,
+    template_id: row.template_id ?? null,
+    request_header: row.request_header ?? null,
+    metadata: row.metadata ?? null,
+    group_name: row.group_name ?? null,
+    ...overrides,
+  };
+}
+
+function getSelectedIds(formData: FormData, key = "selected_ids"): string[] {
+  return formData
+    .getAll(key)
+    .map((value) => (typeof value === "string" ? value.trim() : ""))
+    .filter(Boolean);
 }
 
 function ensureProviderType(value: string): asserts value is (typeof ADMIN_PROVIDER_TYPES)[number] {
@@ -255,14 +308,14 @@ async function resolveApiKey(formData: FormData, id: string | null): Promise<str
   }
 
   if (!id) {
-    throw new Error("新增配置时必须填写 API Key");
+    throw new Error("新增配置时必须填写密钥");
   }
 
   const storage = await getControlPlaneStorage();
   const data = await storage.checkConfigs.getById(id);
 
   if (!data?.api_key) {
-    throw new Error("原有配置缺少 API Key，请重新填写");
+    throw new Error("原有配置缺少密钥，请重新填写");
   }
 
   return data.api_key;
@@ -401,7 +454,7 @@ export async function importManagedStorageAction(formData: FormData): Promise<ne
       throw new Error("请先完成并通过 PostgreSQL 连接测试");
     }
     if (targetProvider === "supabase" && !draft.hasSupabaseAdminCredentials) {
-      throw new Error("请先填写 Supabase URL 与 service-role key，再执行导入");
+      throw new Error("请先填写 Supabase 地址和管理密钥，再执行导入");
     }
 
     const sourceStorage = await getControlPlaneStorage();
@@ -424,7 +477,7 @@ export async function activateManagedStorageAction(formData: FormData): Promise<
     const usesSupabase =
       draft.draftPrimaryProvider === "supabase" || draft.draftBackupProvider === "supabase";
     if (usesSupabase && !draft.hasSupabaseAdminCredentials) {
-      throw new Error("请先填写 Supabase URL 与 service-role key，才能把 Supabase 设为主后端或备用后端");
+      throw new Error("请先填写 Supabase 地址和管理密钥，才能将其设为主后端或备用后端");
     }
     if (usesSupabase) {
       const supabaseStorage = createSupabaseControlPlaneStorage({allowDraft: true});
@@ -603,20 +656,31 @@ export async function upsertConfigAction(formData: FormData): Promise<never> {
     const id = getOptionalText(formData, "id");
     const name = getText(formData, "name");
     const type = getText(formData, "type");
-    const model = getText(formData, "model");
+    const modelInput = getText(formData, "model");
     const endpoint = getText(formData, "endpoint");
 
-    if (!name || !type || !model || !endpoint) {
+    if (!name || !type || !modelInput || !endpoint) {
       throw new Error("名称、类型、模型和接口地址不能为空");
     }
 
     ensureProviderType(type);
     const normalizedEndpoint = normalizeProviderEndpoint(type, endpoint);
+    const models = parseModelList(modelInput);
+
+    if (models.length === 0) {
+      throw new Error("请至少填写一个模型");
+    }
+
+    const storage = await getControlPlaneStorage();
+    const existingConfig = id ? await storage.checkConfigs.getById(id) : null;
+
+    if (id && !existingConfig) {
+      throw new Error("配置不存在或已被删除");
+    }
 
     const payload = {
       name,
       type,
-      model,
       endpoint: normalizedEndpoint,
       api_key: await resolveApiKey(formData, id),
       enabled: getBoolean(formData, "enabled"),
@@ -624,11 +688,46 @@ export async function upsertConfigAction(formData: FormData): Promise<never> {
       template_id: getOptionalText(formData, "template_id"),
       group_name: getOptionalText(formData, "group_name"),
       request_header: parseJsonRecord(formData, "request_header", "请求头覆盖"),
-      metadata: parseJsonRecord(formData, "metadata", "元数据"),
+      metadata: parseJsonRecord(formData, "metadata", "附加参数"),
     };
 
-    const storage = await getControlPlaneStorage();
-    await storage.checkConfigs.upsert({id, ...payload});
+    if (!id) {
+      await Promise.all(
+        models.map((model) =>
+          storage.checkConfigs.upsert({
+            ...payload,
+            name: buildConfigName(name, model, models.length),
+            model,
+          })
+        )
+      );
+      return;
+    }
+
+    if (models.length === 1) {
+      await storage.checkConfigs.upsert({id, ...payload, model: models[0]});
+      return;
+    }
+
+    const baseName = stripGeneratedModelSuffix(name, existingConfig.model);
+    const [primaryModel, ...extraModels] = models;
+
+    await storage.checkConfigs.upsert({
+      id,
+      ...payload,
+      name: buildConfigName(baseName, primaryModel, models.length),
+      model: primaryModel,
+    });
+
+    await Promise.all(
+      extraModels.map((model) =>
+        storage.checkConfigs.upsert({
+          ...payload,
+          name: buildConfigName(baseName, model, models.length),
+          model,
+        })
+      )
+    );
   });
 }
 
@@ -644,6 +743,46 @@ export async function deleteConfigAction(formData: FormData): Promise<never> {
   });
 }
 
+export async function manageConfigsAction(formData: FormData): Promise<never> {
+  return handleAction(formData, "manageConfigs", "批量操作已完成", async () => {
+    const ids = getSelectedIds(formData);
+    const action = getText(formData, "batch_action");
+
+    if (ids.length === 0) {
+      throw new Error("请先至少选择一个配置");
+    }
+
+    const storage = await getControlPlaneStorage();
+
+    if (action === "delete") {
+      await Promise.all(ids.map((itemId) => storage.checkConfigs.delete(itemId)));
+      return;
+    }
+
+    const nextStateByAction: Record<string, Partial<CheckConfigMutationInput>> = {
+      enable: {enabled: true},
+      disable: {enabled: false},
+      maintenance_on: {is_maintenance: true},
+      maintenance_off: {is_maintenance: false},
+    };
+
+    const nextState = nextStateByAction[action];
+    if (!nextState) {
+      throw new Error("不支持的批量操作");
+    }
+
+    const rows = await Promise.all(ids.map((itemId) => storage.checkConfigs.getById(itemId)));
+    const existingRows = rows.filter((row): row is StoredCheckConfigRow => Boolean(row));
+
+    if (existingRows.length === 0) {
+      throw new Error("选中的配置不存在或已被删除");
+    }
+
+    await Promise.all(
+      existingRows.map((row) => storage.checkConfigs.upsert(toCheckConfigMutationInput(row, nextState)))
+    );
+  });
+}
 export async function upsertTemplateAction(formData: FormData): Promise<never> {
   return handleAction(formData, "upsertTemplate", "请求模板已保存", async () => {
     const id = getOptionalText(formData, "id");
@@ -660,7 +799,7 @@ export async function upsertTemplateAction(formData: FormData): Promise<never> {
       name,
       type,
       request_header: parseJsonRecord(formData, "request_header", "模板请求头"),
-      metadata: parseJsonRecord(formData, "metadata", "模板元数据"),
+      metadata: parseJsonRecord(formData, "metadata", "模板附加参数"),
     };
 
     const storage = await getControlPlaneStorage();
@@ -750,3 +889,5 @@ export async function deleteNotificationAction(formData: FormData): Promise<neve
     }
   );
 }
+
+
